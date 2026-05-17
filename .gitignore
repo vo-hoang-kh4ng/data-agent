@@ -1,0 +1,53 @@
+# ==========================================
+#        Python Environment & Cache
+# ==========================================
+.venv/
+env/
+venv/
+ENV/
+bin/
+lib/
+include/
+pip-selfcheck.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ==========================================
+#        Jupyter & Notebook Artifacts
+# ==========================================
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+.pytest_cache/
+.gradio/
+
+# ==========================================
+#      LAMBDA Core App Data & Cache (IMPORTANT)
+# ==========================================
+# Ignore the local session caching directories which contain
+# private user-uploaded Excel datasets, plots, and chats.
+cache/
+dgm_agent/sandbox_lambda/
+tests/temp_cache/
+
+# ==========================================
+#     Local Config & Credentials Fallbacks
+# ==========================================
+# Prevent developer secrets from leaking into Git.
+# If developers choose to hardcode their keys inside config.yaml, 
+# it's best to keep a clean config.yaml.example tracked in git,
+# and ignore the active config.yaml.
+# For simplicity, we track a default template, but developers
+# should use environment variables instead of hardcoding.
+# config.yaml
+
+# ==========================================
+#       IDE Specific & OS Artifacts
+# ==========================================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

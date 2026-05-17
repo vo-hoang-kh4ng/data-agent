@@ -1,0 +1,141 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "LAMBDA Data Agent",
+    "languages": ["python", "yaml", "html", "css", "js"],
+    "frameworks": ["gradio", "jupyter", "pandas", "matplotlib"],
+    "description": "Large Model Based Data Agent for automated data analysis and visualization",
+    "analyzedAt": "2026-05-17T21:30:00Z",
+    "gitCommitHash": ""
+  },
+  "nodes": [
+    {
+      "id": "file:LAMBDA.py",
+      "type": "file",
+      "name": "LAMBDA.py",
+      "summary": "Core agent class that orchestrates the conversation, programmer, and inspector components",
+      "tags": ["core", "agent"],
+      "filePath": "LAMBDA.py"
+    },
+    {
+      "id": "file:lambda_app.py",
+      "type": "file",
+      "name": "lambda_app.py",
+      "summary": "Main Gradio web interface entry point for the application",
+      "tags": ["ui", "entrypoint"],
+      "filePath": "lambda_app.py"
+    },
+    {
+      "id": "file:conversation.py",
+      "type": "file",
+      "name": "conversation.py",
+      "summary": "Manages conversation history and formatting for the LLM",
+      "tags": ["core", "llm"],
+      "filePath": "conversation.py"
+    },
+    {
+      "id": "file:kernel.py",
+      "type": "file",
+      "name": "kernel.py",
+      "summary": "Jupyter kernel execution environment to safely run LLM-generated Python code",
+      "tags": ["execution", "jupyter"],
+      "filePath": "kernel.py"
+    },
+    {
+      "id": "file:programmer.py",
+      "type": "file",
+      "name": "programmer.py",
+      "summary": "Agent responsible for generating Python code to solve the user's data tasks",
+      "tags": ["agent", "generation"],
+      "filePath": "programmer.py"
+    },
+    {
+      "id": "file:inspector.py",
+      "type": "file",
+      "name": "inspector.py",
+      "summary": "Agent responsible for reviewing code and diagnosing execution errors",
+      "tags": ["agent", "debugging"],
+      "filePath": "inspector.py"
+    },
+    {
+      "id": "file:cache/cache.py",
+      "type": "file",
+      "name": "cache.py",
+      "summary": "Data cache manager for handling uploaded files (CSV, Excel, ODS) and generating metadata",
+      "tags": ["data", "io"],
+      "filePath": "cache/cache.py"
+    },
+    {
+      "id": "file:prompt_engineering/prompts.py",
+      "type": "file",
+      "name": "prompts.py",
+      "summary": "Contains all the system prompts for the programmer and inspector agents",
+      "tags": ["llm", "prompts"],
+      "filePath": "prompt_engineering/prompts.py"
+    },
+    {
+      "id": "file:config.yaml",
+      "type": "config",
+      "name": "config.yaml",
+      "summary": "System configuration including LLM endpoints, API keys, and model parameters",
+      "tags": ["config"],
+      "filePath": "config.yaml"
+    }
+  ],
+  "edges": [
+    {"source": "file:lambda_app.py", "target": "file:LAMBDA.py", "type": "imports"},
+    {"source": "file:LAMBDA.py", "target": "file:conversation.py", "type": "imports"},
+    {"source": "file:LAMBDA.py", "target": "file:cache/cache.py", "type": "imports"},
+    {"source": "file:conversation.py", "target": "file:programmer.py", "type": "imports"},
+    {"source": "file:conversation.py", "target": "file:inspector.py", "type": "imports"},
+    {"source": "file:conversation.py", "target": "file:kernel.py", "type": "imports"},
+    {"source": "file:programmer.py", "target": "file:prompt_engineering/prompts.py", "type": "imports"},
+    {"source": "file:inspector.py", "target": "file:prompt_engineering/prompts.py", "type": "imports"}
+  ],
+  "layers": [
+    {
+      "id": "layer:ui",
+      "name": "User Interface",
+      "description": "Gradio web application layer",
+      "nodeIds": ["file:lambda_app.py"]
+    },
+    {
+      "id": "layer:core",
+      "name": "Core Orchestration",
+      "description": "Main application logic and agent coordination",
+      "nodeIds": ["file:LAMBDA.py", "file:conversation.py", "file:config.yaml"]
+    },
+    {
+      "id": "layer:agents",
+      "name": "LLM Agents",
+      "description": "Sub-agents that generate and review code",
+      "nodeIds": ["file:programmer.py", "file:inspector.py", "file:prompt_engineering/prompts.py"]
+    },
+    {
+      "id": "layer:execution",
+      "name": "Execution & Data",
+      "description": "Data management and code execution",
+      "nodeIds": ["file:kernel.py", "file:cache/cache.py"]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "System Entry",
+      "description": "The application starts here using Gradio to provide a web interface for users.",
+      "nodeIds": ["file:lambda_app.py"]
+    },
+    {
+      "order": 2,
+      "title": "Agent Orchestrator",
+      "description": "The LAMBDA class coordinates the chat history and manages the underlying sub-agents.",
+      "nodeIds": ["file:LAMBDA.py"]
+    },
+    {
+      "order": 3,
+      "title": "Code Generation & Execution",
+      "description": "The programmer writes code based on prompts, which is then executed safely in the Jupyter kernel.",
+      "nodeIds": ["file:programmer.py", "file:kernel.py", "file:prompt_engineering/prompts.py"]
+    }
+  ]
+}

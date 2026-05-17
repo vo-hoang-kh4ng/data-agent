@@ -1,0 +1,49 @@
+#================================================================================================
+#                                       Config of the LLMs
+#================================================================================================
+# === Option 1: Local LLM via vLLM ===
+# Nếu bạn chạy LLM cục bộ qua vLLM (ví dụ: vllm serve meta-llama/Llama-3-8B-Instruct)
+# thì thay đổi base_url và model name cho phù hợp:
+#   conv_model : "meta-llama/Llama-3-8B-Instruct"
+#   base_url_* : "http://localhost:8000/v1"
+#   api_key : "token-abc123"  # vLLM thường không cần API key thật, đặt bất kỳ giá trị nào
+
+# === Option 2: Local LLM via LLaMA-Factory ===
+# Nếu bạn dùng LLaMA-Factory API server:
+#   conv_model : "your-model-name"
+#   base_url_* : "http://localhost:8000/v1"
+#   api_key : "0"
+
+# === Option 3: Local LLM via Ollama ===
+# Nếu bạn dùng Ollama:
+#   conv_model : "llama3"
+#   base_url_* : "http://localhost:11434/v1"
+#   api_key : "ollama"
+
+# === Option 4: OpenAI API hoặc OpenRouter (Free) ===
+# Dùng API key thật từ OpenAI hoặc OpenRouter:
+#   conv_model : "gpt-4.1-mini"
+#   base_url_* : "https://api.openai.com/v1"
+#   api_key : "sk-xxxxxxx"
+
+# --- Cấu hình hiện tại (đã chuyển sang Groq API - Llama 3.1 8B để tránh Rate Limit 70B) ---
+conv_model : "llama-3.1-8b-instant"   # Groq Model (8B cực nhanh, hạn mức TPD 500k cao gấp 5 lần)
+programmer_model : "llama-3.1-8b-instant"
+inspector_model : "llama-3.1-8b-instant"
+api_key : "YOUR_GROQ_API_KEY_HERE"
+base_url_conv_model : 'https://api.groq.com/openai/v1'   # Groq API server
+base_url_programmer : 'https://api.groq.com/openai/v1'
+base_url_inspector : 'https://api.groq.com/openai/v1'
+
+
+#================================================================================================
+#                                       Config of the system
+#================================================================================================
+project_cache_path : "cache/conv_cache/" # local cache path
+max_attempts : 5 # The max attempts of self-correcting
+max_exe_time: 18000 # max time for the execution
+load_chat: False # whether to load the dialogue from the local cache
+chat_history_path: "" # The path of the chat history, effective if load_chat is True.
+
+#knowledge integration
+retrieval : False # whether to start a knowledge retrieval. If you don't create your knowledge base, you should set it to False
