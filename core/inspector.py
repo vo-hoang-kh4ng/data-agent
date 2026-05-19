@@ -160,6 +160,9 @@ class Inspector:
 class Verifier:
     def __init__(self):
         self.benchmark = PolyglotBenchmark()
+        # Thiết lập Vùng Goldilocks cho Epiplexity (Khoảng thông tin có thể học)
+        self.min_epiplexity = 0.5
+        self.max_epiplexity = 1.8
 
     def evaluate_pass_at_1(self, code_solution, task, budget=None) -> bool:
         """
@@ -200,10 +203,60 @@ class Verifier:
         is_success = val < p_success
         return is_success
 
-    def estimate_epiplexity(self, task_desc: str) -> float:
-        """Đo lường lượng thông tin có thể học (MDL/Epiplexity)"""
-        # Trả về điểm giả lập nằm trong vùng Goldilocks
-        return random.uniform(0.6, 1.5)
+    def _calculate_mdl(self, text: str) -> float:
+        """
+        Xấp xỉ Minimum Description Length (MDL) bằng thuật toán nén DEFLATE (zlib).
+        Theo lý thuyết thông tin, chuỗi càng khó đoán/chứa nhiều thông tin mới thì 
+        chiều dài sau khi nén càng lớn.
+        """
+        if not text:
+            return 0.0
+        # Nén chuỗi text và trả về dung lượng bytes
+        compressed = zlib.compress(text.encode('utf-8'))
+        return float(len(compressed))
+
+    def estimate_epiplexity(self, task_description: str, generated_code: str) -> float:
+        """
+        Đo lường Learnable Information Gain (Epiplexity) giữa Đề bài và Code giải quyết.
+        Áp dụng công thức Normalized Compression Distance (NCD) để xấp xỉ Prequential Coding.
+        """
+        print("🧮 Đang tính toán Epiplexity/MDL thực tế...")
+        
+        # 1. Đo MDL của riêng đề bài (Context)
+        mdl_task = self._calculate_mdl(task_description)
+        
+        # 2. Đo MDL của riêng code giải pháp (Solution)
+        mdl_solution = self._calculate_mdl(generated_code)
+        
+        # 3. Đo MDL chung khi ghép cả Đề bài và Code (Joint Complexity)
+        mdl_joint = self._calculate_mdl(task_description + "\n" + generated_code)
+
+        if max(mdl_task, mdl_solution) == 0:
+            return 0.0
+
+        # 4. Tính toán Information Distance (NCD)
+        # NCD = [MDL(x,y) - min(MDL(x), MDL(y))] / max(MDL(x), MDL(y))
+        ncd_score = (mdl_joint - min(mdl_task, mdl_solution)) / max(mdl_task, mdl_solution)
+
+        # 5. Scale điểm NCD (thường từ 0 -> 1) sang hệ số Epiplexity (0.0 -> 2.0)
+        # - 0.0 -> 0.5: Quá dễ (Code chép lại y hệt đề bài, không có thông tin mới)
+        # - 0.5 -> 1.8: Vùng Goldilocks (Code giải quyết logic phức tạp dựa trên đề)
+        # - 1.8 -> 2.0: Quá khó / Nhiễu (Sinh ra code rác hoặc hoàn toàn không liên quan)
+        epiplexity_score = ncd_score * 2.0
+
+        print(f"   -> Kết quả hàm toán học: MDL(Task)={mdl_task} | MDL(Sol)={mdl_solution} | Epiplexity={epiplexity_score:.4f}")
+        return round(epiplexity_score, 4)
+
+    def is_in_goldilocks_zone(self, task_description: str, generated_code: str) -> dict:
+        """Bộ lọc phân loại tự động cho LAMBDA.py"""
+        score = self.estimate_epiplexity(task_description, generated_code)
+        is_pass = self.min_epiplexity <= score <= self.max_epiplexity
+        
+        return {
+            "epiplexity_score": score,
+            "goldilocks_status": "PASS" if is_pass else "FAIL",
+            "message": "Nằm trong vùng học tập tối ưu" if is_pass else "Dữ liệu bị loại (Quá dễ hoặc Quá khó/Nhiễu)"
+        }
 
     def run_staged_evaluation(self, agent_instance, budget=None):
         """Thực thi chiến lược Đánh giá theo Giai đoạn"""

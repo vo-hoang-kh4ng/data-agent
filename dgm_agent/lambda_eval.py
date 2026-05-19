@@ -11,11 +11,29 @@ def run_lambda_eval(sandbox_dir: str, budget: dict = None) -> dict:
     import os
     
     # 1. Simulate Stage 1 - 4 checks
-    epiplexity = 1.2
     score = 0.8
     is_valid = True
     goldilocks = "PASS"
     stderr = ""
+    
+    # Calculate Epiplexity based on actual code mutation MDL
+    original_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "LAMBDA.py")
+    mutated_path = os.path.join(sandbox_dir, "LAMBDA.py")
+    
+    original_code = ""
+    mutated_code = ""
+    if os.path.exists(original_path):
+        with open(original_path, "r", encoding="utf-8") as f:
+            original_code = f.read()
+    if os.path.exists(mutated_path):
+        with open(mutated_path, "r", encoding="utf-8") as f:
+            mutated_code = f.read()
+            
+    from core.inspector import Verifier
+    verifier = Verifier()
+    verdict = verifier.is_in_goldilocks_zone(original_code, mutated_code)
+    epiplexity = verdict["epiplexity_score"]
+    goldilocks = verdict["goldilocks_status"]
     
     # 2. Run Polyglot Staged Evaluation on child_agent
     if sandbox_dir not in sys.path:
