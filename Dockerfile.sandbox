@@ -1,0 +1,16 @@
+FROM python:3.10-slim
+
+# Tạo user không có quyền root (Tránh leo thang đặc quyền)
+RUN useradd -m sandboxuser
+
+WORKDIR /app
+
+# Chỉ cài các thư viện an toàn
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt pytest
+
+# Chuyển sang user an toàn
+USER sandboxuser
+
+# Lệnh mặc định
+CMD ["pytest", "tests/"]

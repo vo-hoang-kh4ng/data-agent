@@ -5,11 +5,42 @@ import re
 import sys
 import importlib.util
 from datetime import datetime
+# Add parent directory and current directory to path so we can import from core/ and dgm_agent/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from lambda_eval import run_lambda_eval
 from strategy_validator import validate_strategy
 
-# Add parent directory to path so we can import from core/
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+class MutationController:
+    def __init__(self):
+        # KHU VỰC BẤT KHẢ XÂM PHẠM: Tác tử không được phép sửa các file này
+        self.FROZEN_FILES = [
+            "core/inspector.py",         # Hàm tính toán Epiplexity & NCD
+            "dgm_agent/lambda_eval.py",  # Bộ chạy test
+            "scripts/download_polyglot.py", # Bộ đề thi chuẩn
+            "plot_results.py"            # Bộ vẽ biểu đồ & điều phối chính
+        ]
+
+    def apply_mutation(self, target_file_path: str, new_code: str) -> bool:
+        """Kiểm duyệt và áp dụng code mới từ LLM"""
+        # Chuẩn hóa đường dẫn để tránh đường dẫn tương đối để vượt rào
+        normalized_path = os.path.normpath(target_file_path).replace("\\", "/")
+        
+        # 1. Kiểm tra quyền truy cập (Anti-Objective Hacking)
+        if any(frozen_file in normalized_path for frozen_file in self.FROZEN_FILES):
+            print(f"🚨 CẢNH BÁO BẢO MẬT: Tác tử đang cố gắng hack luật chơi!")
+            print(f"   -> Mục tiêu: {target_file_path}")
+            print(f"   -> Hành động: BỊ CHẶN LẠI (BLOCKED).")
+            return False
+            
+        # 2. Cho phép ghi đè (Chỉ áp dụng với proposer, programmer, DGM_lambda...)
+        os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
+        with open(target_file_path, "w", encoding="utf-8") as f:
+            f.write(new_code)
+        print(f"✅ Đột biến an toàn đã được áp dụng lên: {target_file_path}")
+        return True
 
 
 def simulate_llm_mutation(prompt, target_file):
@@ -29,10 +60,12 @@ def simulate_llm_mutation(prompt, target_file):
         "class LAMBDA:\n    # [DGM EVOLVED] Added by Darwin Godel Machine evolution step!\n"
     )
     
-    with open(target_file, 'w', encoding='utf-8') as f:
-        f.write(mutated_content)
-        
-    return "Added evolution comment to LAMBDA class (MOCK)."
+    success = MutationController().apply_mutation(target_file, mutated_content)
+    if success:
+        return "Added evolution comment to LAMBDA class (MOCK)."
+    else:
+        return "Mutation blocked by security guardrails."
+
 
 def groq_llm_mutation(prompt, target_file, model=None, temperature=0.2, error_feedback=None):
     """
@@ -122,10 +155,11 @@ def groq_llm_mutation(prompt, target_file, model=None, temperature=0.2, error_fe
             # Fallback if the LLM didn't use markdown
             new_code = response_text
 
-        with open(target_file, 'w', encoding='utf-8') as f:
-            f.write(new_code)
-            
-        return "Applied Groq API mutation to LAMBDA.py."
+        success = MutationController().apply_mutation(target_file, new_code)
+        if success:
+            return "Applied Groq API mutation to LAMBDA.py."
+        else:
+            return "Mutation blocked by security guardrails."
     except Exception as e:
         print(f"Groq API Error: {e}")
         return f"Failed to apply mutation. Error: {e}"

@@ -3,8 +3,10 @@ import sys
 import pytest
 from pathlib import Path
 
-# Add the parent directory to sys.path so we can import LAMBDA
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the parent directory and dgm_agent to sys.path so we can import LAMBDA and utilities
+repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, repo_root)
+sys.path.append(os.path.join(repo_root, "dgm_agent"))
 from LAMBDA import LAMBDA
 
 class FakeFile:
