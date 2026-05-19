@@ -28,19 +28,15 @@ __pycache__/
 # Ignore the local session caching directories which contain
 # private user-uploaded Excel datasets, plots, and chats.
 cache/
-dgm_agent/sandbox_lambda/
+dgm_agent/sandbox_lambda*/
 tests/temp_cache/
 
 # ==========================================
 #     Local Config & Credentials Fallbacks
 # ==========================================
 # Prevent developer secrets from leaking into Git.
-# If developers choose to hardcode their keys inside config.yaml, 
-# it's best to keep a clean config.yaml.example tracked in git,
-# and ignore the active config.yaml.
-# For simplicity, we track a default template, but developers
-# should use environment variables instead of hardcoding.
-# config.yaml
+.env
+config.yaml
 
 # ==========================================
 #       IDE Specific & OS Artifacts

@@ -4,8 +4,8 @@
     "name": "LAMBDA Data Agent",
     "languages": ["python", "yaml", "html", "css", "js"],
     "frameworks": ["gradio", "jupyter", "pandas", "matplotlib"],
-    "description": "Large Model Based Data Agent for automated data analysis and visualization",
-    "analyzedAt": "2026-05-17T21:30:00Z",
+    "description": "Large Model Based Data Agent with Q1 Triadic Evolution (Proposer-Solver-Verifier) and MDL Epiplexity scoring",
+    "analyzedAt": "2026-05-18T23:10:00Z",
     "gitCommitHash": ""
   },
   "nodes": [
@@ -45,17 +45,25 @@
       "id": "file:programmer.py",
       "type": "file",
       "name": "programmer.py",
-      "summary": "Agent responsible for generating Python code to solve the user's data tasks",
-      "tags": ["agent", "generation"],
+      "summary": "SOLVER Agent: generates Python code to solve data analysis tasks proposed by the Proposer",
+      "tags": ["agent", "solver", "generation"],
       "filePath": "programmer.py"
     },
     {
       "id": "file:inspector.py",
       "type": "file",
       "name": "inspector.py",
-      "summary": "Agent responsible for reviewing code and diagnosing execution errors",
-      "tags": ["agent", "debugging"],
+      "summary": "VERIFIER Agent: judges code correctness and computes MDL Epiplexity score for Goldilocks filtering",
+      "tags": ["agent", "verifier", "epiplexity", "debugging"],
       "filePath": "inspector.py"
+    },
+    {
+      "id": "file:core/proposer.py",
+      "type": "file",
+      "name": "proposer.py",
+      "summary": "PROPOSER Agent: mines knowledge graph nodes for context and generates grounded data analysis tasks with controlled difficulty",
+      "tags": ["agent", "proposer", "dgm", "knowledge-graph"],
+      "filePath": "core/proposer.py"
     },
     {
       "id": "file:cache/cache.py",
@@ -80,6 +88,22 @@
       "summary": "System configuration including LLM endpoints, API keys, and model parameters",
       "tags": ["config"],
       "filePath": "config.yaml"
+    },
+    {
+      "id": "file:dgm_agent/DGM_lambda.py",
+      "type": "file",
+      "name": "DGM_lambda.py",
+      "summary": "Darwin Gödel Machine evolution engine with EvolutionaryScheduler implementing Triadic cycle (Proposer→Solver→Verifier) and Archive with Goldilocks filter",
+      "tags": ["dgm", "evolution", "archive", "triadic"],
+      "filePath": "dgm_agent/DGM_lambda.py"
+    },
+    {
+      "id": "file:dgm_agent/lambda_eval.py",
+      "type": "file",
+      "name": "lambda_eval.py",
+      "summary": "4-stage fitness evaluation pipeline: Syntax → Import → Pytest → Epiplexity Filter (Goldilocks Zone)",
+      "tags": ["dgm", "evaluation", "epiplexity", "goldilocks"],
+      "filePath": "dgm_agent/lambda_eval.py"
     }
   ],
   "edges": [
@@ -90,7 +114,12 @@
     {"source": "file:conversation.py", "target": "file:inspector.py", "type": "imports"},
     {"source": "file:conversation.py", "target": "file:kernel.py", "type": "imports"},
     {"source": "file:programmer.py", "target": "file:prompt_engineering/prompts.py", "type": "imports"},
-    {"source": "file:inspector.py", "target": "file:prompt_engineering/prompts.py", "type": "imports"}
+    {"source": "file:inspector.py", "target": "file:prompt_engineering/prompts.py", "type": "imports"},
+    {"source": "file:dgm_agent/DGM_lambda.py", "target": "file:dgm_agent/lambda_eval.py", "type": "imports"},
+    {"source": "file:dgm_agent/DGM_lambda.py", "target": "file:core/proposer.py", "type": "imports"},
+    {"source": "file:dgm_agent/lambda_eval.py", "target": "file:inspector.py", "type": "imports"},
+    {"source": "file:core/proposer.py", "target": "file:config.yaml", "type": "configures"},
+    {"source": "file:dgm_agent/DGM_lambda.py", "target": "file:config.yaml", "type": "configures"}
   ],
   "layers": [
     {
@@ -107,15 +136,21 @@
     },
     {
       "id": "layer:agents",
-      "name": "LLM Agents",
-      "description": "Sub-agents that generate and review code",
-      "nodeIds": ["file:programmer.py", "file:inspector.py", "file:prompt_engineering/prompts.py"]
+      "name": "Triadic LLM Agents",
+      "description": "The three agent roles: Proposer (task generation), Solver (code writing), Verifier (correctness + epiplexity)",
+      "nodeIds": ["file:programmer.py", "file:inspector.py", "file:core/proposer.py", "file:prompt_engineering/prompts.py"]
     },
     {
       "id": "layer:execution",
       "name": "Execution & Data",
       "description": "Data management and code execution",
       "nodeIds": ["file:kernel.py", "file:cache/cache.py"]
+    },
+    {
+      "id": "layer:dgm",
+      "name": "Darwin Gödel Machine",
+      "description": "Self-evolving engine with Archive, Goldilocks filter, and Epiplexity scoring",
+      "nodeIds": ["file:dgm_agent/DGM_lambda.py", "file:dgm_agent/lambda_eval.py"]
     }
   ],
   "tour": [
@@ -133,9 +168,21 @@
     },
     {
       "order": 3,
-      "title": "Code Generation & Execution",
-      "description": "The programmer writes code based on prompts, which is then executed safely in the Jupyter kernel.",
-      "nodeIds": ["file:programmer.py", "file:kernel.py", "file:prompt_engineering/prompts.py"]
+      "title": "Triadic Agents (Q1 Paper)",
+      "description": "The Proposer generates tasks from the knowledge graph, the Solver (Programmer) writes code, and the Verifier (Inspector) judges correctness with MDL Epiplexity scoring.",
+      "nodeIds": ["file:core/proposer.py", "file:programmer.py", "file:inspector.py"]
+    },
+    {
+      "order": 4,
+      "title": "Code Execution",
+      "description": "Python code is executed safely in the Jupyter kernel sandbox.",
+      "nodeIds": ["file:kernel.py", "file:prompt_engineering/prompts.py"]
+    },
+    {
+      "order": 5,
+      "title": "DGM Evolution Engine",
+      "description": "The EvolutionaryScheduler runs the Triadic cycle, evaluates mutations through the 4-stage pipeline (Syntax→Import→Pytest→Epiplexity), and archives only Goldilocks-zone generations.",
+      "nodeIds": ["file:dgm_agent/DGM_lambda.py", "file:dgm_agent/lambda_eval.py"]
     }
   ]
 }

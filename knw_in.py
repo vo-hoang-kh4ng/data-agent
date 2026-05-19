@@ -24,10 +24,21 @@ def knowledge_register():
     pami_key = pami.name+pami.description
     KNW_INJECTION[pami_key] = pami
 
-embeding_model = SentenceTransformer('all-MiniLM-L6-v2')
+_embedding_model = None
+
+def get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        if '_shared_embedding_model' in sys.modules:
+            _embedding_model = sys.modules['_shared_embedding_model']
+        else:
+            _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            sys.modules['_shared_embedding_model'] = _embedding_model
+    return _embedding_model
 
 def search_knowledge(user_input, knowledge_embeddings, knowledge_keys):
-    input_embedding = embeding_model.encode(user_input, convert_to_tensor=True)
+    model = get_embedding_model()
+    input_embedding = model.encode(user_input, convert_to_tensor=True)
     similarities_list = util.pytorch_cos_sim(input_embedding, knowledge_embeddings)
     if torch.max(similarities_list) > 0.5:
         best_match_idx = np.argmax(similarities_list.cpu())
@@ -56,7 +67,8 @@ def format_code_snaps(knw, kernel):
 def retrieval_knowledge(instruction, kernel): # return code_snaps and mode: 'full' or runnable code in 'core'. Nothing retrieval, return None
     knowledge_register()
     knowledge_keys = list(KNW_INJECTION.keys())
-    knowledge_embeddings = embeding_model.encode(knowledge_keys, convert_to_tensor=True)
+    model = get_embedding_model()
+    knowledge_embeddings = model.encode(knowledge_keys, convert_to_tensor=True)
     best_key, best_knw_object = search_knowledge(instruction, knowledge_embeddings, knowledge_keys)
     if best_key:
         return format_code_snaps(best_knw_object, kernel)

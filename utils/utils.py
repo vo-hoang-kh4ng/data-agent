@@ -16,11 +16,33 @@ def get_project_root():
         # 如果是正常的 .py 腳本運行，使用原始的向上尋找邏輯
         current_dir = Path(__file__).resolve().parent
         while current_dir != current_dir.parent:
-            if (current_dir / '.git').exists() or (current_dir / 'setup.py').exists():
+            if (current_dir / '.git').exists() or (current_dir / 'setup.py').exists() or (current_dir / 'config.yaml').exists():
                 return current_dir
             current_dir = current_dir.parent
-        # 如果找不到標記，可以返回當前工作目錄或腳本目錄作為備用
         return Path(os.getcwd())
+
+def load_env_file():
+    """Manually parse .env file to load keys into os.environ without dependencies."""
+    project_root = get_project_root()
+    env_path = os.path.join(str(project_root), ".env")
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip()
+                        if val.startswith(('"', "'")) and val.endswith(('"', "'")):
+                            val = val[1:-1]
+                        os.environ[key] = val
+            print(f"[INFO] Loaded environment variables from {env_path}")
+        except Exception as e:
+            print(f"[WARNING] Failed to load .env file: {e}")
+
+# Automatically load environmental keys on module import
+load_env_file()
 
 
 def to_absolute_path(relative_path):

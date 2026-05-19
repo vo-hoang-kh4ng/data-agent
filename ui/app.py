@@ -76,19 +76,20 @@ def launch_app():
         with gr.Tab("Configuration"):
             gr.Markdown("# System Configuration for LAMBDA")
             with gr.Row():
-                conv_model = gr.Textbox(value="gpt-5-mini", label="Conversation Model")
-                programmer_model = gr.Textbox(value="gpt-4.1-mini", label="Programmer Model")
-                inspector_model = gr.Textbox(value="gpt-4.1-mini", label="Inspector Model")
+                conv_model = gr.Textbox(value=Lambda.config.get("conv_model", "gpt-5-mini"), label="Conversation Model")
+                programmer_model = gr.Textbox(value=Lambda.config.get("programmer_model", "gpt-4.1-mini"), label="Programmer Model")
+                inspector_model = gr.Textbox(value=Lambda.config.get("inspector_model", "gpt-4.1-mini"), label="Inspector Model")
             
-            api_key = gr.Textbox(label="API Key", type="password", placeholder="Input Your API key")
+            # API key defaults to config api_key
+            api_key = gr.Textbox(value=Lambda.config.get("api_key", ""), label="API Key", type="password", placeholder="Input Your API key")
             with gr.Row():
-                base_url_conv_model = gr.Textbox(value='https://api.openai.com/v1', label="Base URL (Conv Model)")
-                base_url_programmer = gr.Textbox(value='https://api.openai.com/v1', label="Base URL (Programmer)")
-                base_url_inspector = gr.Textbox(value='https://api.openai.com/v1', label="Base URL (Inspector)")
+                base_url_conv_model = gr.Textbox(value=Lambda.config.get("base_url_conv_model", "https://api.openai.com/v1"), label="Base URL (Conv Model)")
+                base_url_programmer = gr.Textbox(value=Lambda.config.get("base_url_programmer", "https://api.openai.com/v1"), label="Base URL (Programmer)")
+                base_url_inspector = gr.Textbox(value=Lambda.config.get("base_url_inspector", "https://api.openai.com/v1"), label="Base URL (Inspector)")
 
             with gr.Row():
-                max_attempts = gr.Number(value=5, label="Max Attempts", precision=0)
-                max_exe_time = gr.Number(value=18000, label="Max Execution Time (s)", precision=0)
+                max_attempts = gr.Number(value=Lambda.config.get("max_attempts", 5), label="Max Attempts", precision=0)
+                max_exe_time = gr.Number(value=Lambda.config.get("max_exe_time", 18000), label="Max Execution Time (s)", precision=0)
             with gr.Row():            
                 load_chat = gr.Checkbox(value=False, label="Load from Cache")
                 chat_history_path = gr.Textbox(label="Chat History Path", visible=False, interactive=True)
@@ -136,8 +137,10 @@ def launch_app():
             
             dgm_btn.click(fn=run_dgm_ui, inputs=[], outputs=dgm_log)
 
+    server_name = Lambda.config.get("server_name", "0.0.0.0")
+    server_port = Lambda.config.get("server_port", 8000)
     demo.queue()
-    demo.launch(server_name="0.0.0.0", server_port=8000, allowed_paths=[to_absolute_path(Lambda.config["project_cache_path"])],
+    demo.launch(server_name=server_name, server_port=server_port, allowed_paths=[to_absolute_path(Lambda.config["project_cache_path"])],
                 share=False, inbrowser=True, theme=gr.themes.Soft(), css=css, js=js)
 
 

@@ -45,5 +45,9 @@ max_exe_time: 18000 # max time for the execution
 load_chat: False # whether to load the dialogue from the local cache
 chat_history_path: "" # The path of the chat history, effective if load_chat is True.
 
+# Gradio Web UI settings
+server_name: "0.0.0.0"
+server_port: 8000
+
 #knowledge integration
 retrieval : False # whether to start a knowledge retrieval. If you don't create your knowledge base, you should set it to False
