@@ -71,6 +71,13 @@ def run_lambda_eval(sandbox_dir: str, budget: dict = None) -> dict:
     """
     Chạy Đánh giá 4 Giai đoạn với môi trường Docker Sandbox cách ly hoàn toàn,
     tự động fallback sang Local Host nếu Docker không khả dụng.
+    
+    LƯU Ý KHOA HỌC (Academic Note):
+    Môi trường Docker Sandbox ở đây đóng vai trò là "Syntax & Runtime safety checker" (Kiểm tra biên dịch và chạy).
+    Nó ngăn chặn mã nguồn độc hại hoặc lỗi nghiêm trọng của tác tử đột biến (LAMBDA.py) làm hỏng máy host.
+    
+    Khi chạy tiến hóa, lệnh `docker run` sẽ ghi đè CMD mặc định (pytest tests/) trong Dockerfile.sandbox
+    bằng cách gọi trực tiếp lệnh Python chạy hàm `run_local_eval` để kiểm tra độ tin cậy của thuật toán.
     """
     score = 0.8
     is_valid = True

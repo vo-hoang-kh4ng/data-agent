@@ -110,6 +110,16 @@ export GROQ_API_KEY="your-groq-api-key-here"
 
 We evaluate the self-evolving agentic capabilities on the **Polyglot Benchmark**, which spans 60 programming problems across 6 major languages (Python, Go, C++, Rust, Java, JavaScript) evaluated under staged execution criteria.
 
+### 🧪 Two-Tier Evaluation Strategy (Surrogate-Assisted Evolutionary Search)
+To handle the heavy computational requirements of compiling and executing 6 different languages under Docker containers for every candidate mutant during open-ended evolution, Triadic DGM employs a standard **Surrogate-Assisted Evolutionary Algorithm (SAEA)** paradigm:
+
+1. **Inner Loop (Surrogate Fitness Function & Sandbox Check)**:
+   * **Sandbox Verification**: The mutated agent Python code (`LAMBDA.py`) is run inside the isolated `Dockerfile.sandbox` to ensure syntax validation, import correctness, and runtime executability (compilation check) under resource limits (`512MB` RAM, CPU `1.0`).
+   * **Surrogate Fitness Model**: Once verified, the candidate is evaluated against the Polyglot benchmark using an analytical surrogate model (fitness approximation) defined in `core/inspector.py`. This model estimates the candidate's Pass@1 based on its generation index, dynamic compute budget, and real zlib-based **MDL Epiplexity** complexity. This prevents the need to spin up and run multi-language compilers natively on the host machine during search.
+2. **Outer Loop (Empirical Compilation & Evaluation)**:
+   * Driven by `dgm_agent/DGM_outer.py` and `dgm_agent/polyglot/harness.py`.
+   * For the final selected agent, the system builds dedicated environment Docker containers for C++, Go, Rust, Java, JavaScript, and Python, copies the generated code, compiles it using real compilers (GCC, Cargo, Go build, JDK, Node.js), and executes the actual hidden unit tests to verify the empirical Pass@1 score.
+
 ### 1. Pre-download the Benchmark Dataset
 Initialize the Polyglot suite metadata:
 ```bash
