@@ -157,7 +157,7 @@ def groq_llm_mutation(prompt, target_file, model=None, temperature=0.2, error_fe
 
         success = MutationController().apply_mutation(target_file, new_code)
         if success:
-            return "Applied Groq API mutation to LAMBDA.py."
+            return f"Applied Groq API mutation to {os.path.basename(target_file)}."
         else:
             return "Mutation blocked by security guardrails."
     except Exception as e:
