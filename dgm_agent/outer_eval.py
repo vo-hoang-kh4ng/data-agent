@@ -240,10 +240,12 @@ def download_task_files(task_id: str, dest_dir: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def generate_solution(task_id: str, problem_statement: str,
-                       stub_path: str | None, model: str = None) -> str:
+                       stub_path: str | None, model: str = None,
+                       previous_code: str = None, previous_error: str = None) -> str:
     """
     Call Groq (or mock) LLM to generate a solution for the task.
-    Returns the Python/JS code as a string.
+    Supports Reflexion (Test-Driven Self-Correction) if previous_error is provided.
+    Returns the code as a string.
     """
     # Load existing stub for context
     stub_content = ""
@@ -260,12 +262,22 @@ def generate_solution(task_id: str, problem_statement: str,
         "Write ONLY the implementation code — no explanations, no markdown fences. "
         "The code must pass all unit tests."
     )
-    user_prompt = (
-        f"Exercise: {exercise}\n\n"
-        f"Problem:\n{problem_statement}\n\n"
-        f"Current stub:\n{stub_content}\n\n"
-        f"Write a complete, correct {lang} implementation."
-    )
+    
+    if previous_code and previous_error:
+        user_prompt = (
+            f"Exercise: {exercise}\n\n"
+            f"Problem:\n{problem_statement}\n\n"
+            f"You previously generated this code:\n```\n{previous_code}\n```\n\n"
+            f"However, it failed the tests with this error:\n```\n{previous_error}\n```\n\n"
+            f"Please fix the code to pass the tests. Write ONLY the corrected {lang} implementation code."
+        )
+    else:
+        user_prompt = (
+            f"Exercise: {exercise}\n\n"
+            f"Problem:\n{problem_statement}\n\n"
+            f"Current stub:\n{stub_content}\n\n"
+            f"Write a complete, correct {lang} implementation."
+        )
 
     # Try Groq API
     try:
@@ -274,7 +286,7 @@ def generate_solution(task_id: str, problem_statement: str,
         if not api_key or api_key == "YOUR_GROQ_API_KEY_HERE":
             raise ValueError("No valid GROQ_API_KEY")
         client = Groq(api_key=api_key)
-        use_model = model or os.environ.get("DGM_MODEL", "llama-3.1-8b-instant")
+        use_model = model or os.environ.get("DGM_MODEL", "llama-3.3-70b-versatile")
         print(f"    [llm] Calling Groq ({use_model}) for {task_id}...")
         resp = client.chat.completions.create(
             model=use_model,
@@ -780,52 +792,82 @@ def run_outer_eval(
             })
             continue
 
-        # Generate solution using best agent (LLM) or reference
+        # Generate and test loop (Reflexion)
+        max_retries = 3
+        passed = False
+        test_result = None
+        solution_code = None
+        error_log = None
+        
         mode = "reference" if use_reference else "LLM"
-        print(f"  Generating solution ({mode}, Gen {best_agent.get('cycle', 0)})...")
-        if use_reference:
-            solution_code = _get_reference_solution(task_id, "")
-        else:
-            solution_code = generate_solution(
-                task_id,
-                meta["problem_statement"],
-                stub_path,
-                model=groq_model,
-            )
+        for attempt in range(max_retries):
+            if attempt == 0:
+                print(f"  Generating solution ({mode}, Gen {best_agent.get('cycle', 0)})...")
+                if use_reference:
+                    solution_code = _get_reference_solution(task_id, "")
+                else:
+                    solution_code = generate_solution(
+                        task_id,
+                        meta["problem_statement"],
+                        stub_path,
+                        model=groq_model,
+                    )
+            else:
+                print(f"  [Reflexion] Attempt {attempt+1}/{max_retries} - Fixing previous errors...")
+                solution_code = generate_solution(
+                    task_id,
+                    meta["problem_statement"],
+                    stub_path,
+                    model=groq_model,
+                    previous_code=solution_code,
+                    previous_error=error_log
+                )
 
-        # Write solution to solution file
-        solution_filename = meta["files"]["solution_stub"]
-        solution_path = os.path.join(task_dir, solution_filename)
-        with open(solution_path, "w", encoding="utf-8") as f:
-            f.write(solution_code)
-        print(f"  Solution written ({len(solution_code)} chars)")
+            # Write solution to solution file
+            solution_filename = meta["files"]["solution_stub"]
+            solution_path = os.path.join(task_dir, solution_filename)
+            with open(solution_path, "w", encoding="utf-8") as f:
+                f.write(solution_code)
+            
+            if attempt == 0:
+                print(f"  Solution written ({len(solution_code)} chars)")
 
-        # Run tests
-        print(f"  Running {lang} tests...")
-        if lang == "python":
-            test_result = run_python_test(task_dir, os.path.basename(test_path))
-        elif lang == "javascript":
-            test_result = run_javascript_test(task_dir)
-        elif lang == "go":
-            test_result = run_go_test(task_dir)
-        elif lang == "rust":
-            test_result = run_rust_test(task_dir)
-        elif lang == "java":
-            test_result = run_java_test(task_dir)
-        elif lang == "cpp":
-            test_result = run_cpp_test(task_dir)
-        else:
-            test_result = {"exit_code": -1, "stdout": "", "stderr": "Language not supported"}
+            # Run tests
+            print(f"  Running {lang} tests...")
+            if lang == "python":
+                test_result = run_python_test(task_dir, os.path.basename(test_path))
+            elif lang == "javascript":
+                test_result = run_javascript_test(task_dir)
+            elif lang == "go":
+                test_result = run_go_test(task_dir)
+            elif lang == "rust":
+                test_result = run_rust_test(task_dir)
+            elif lang == "java":
+                test_result = run_java_test(task_dir)
+            elif lang == "cpp":
+                test_result = run_cpp_test(task_dir)
+            else:
+                test_result = {"exit_code": -1, "stdout": "", "stderr": "Language not supported"}
 
-        passed = test_result["exit_code"] == 0
-        status_str = "PASS" if passed else "FAIL"
-        print(f"  Result: {status_str} (exit_code={test_result['exit_code']})")
-        if not passed:
-            # Show both stdout and stderr for debugging
+            passed = test_result["exit_code"] == 0
+            status_str = "PASS" if passed else "FAIL"
+            print(f"  Result: {status_str} (exit_code={test_result['exit_code']})")
+            
+            if passed:
+                break
+            
+            # Prepare error log for next Reflexion attempt
+            if not passed:
+                error_log = test_result.get("stderr", "")
+                if not error_log.strip():
+                    error_log = test_result.get("stdout", "")
+                error_log = error_log[-2000:]  # Limit context size
+
             if test_result.get("stdout"):
                 print(f"  Stdout: {test_result['stdout'][:600]}")
             if test_result.get("stderr"):
                 print(f"  Stderr: {test_result['stderr'][:400]}")
+
 
         results.append({
             "task_id": task_id,
