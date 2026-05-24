@@ -114,6 +114,67 @@ TASK_REGISTRY = {
             "Handle singular/plural 'bottle'/'bottles' correctly."
         ),
     },
+    # Go tasks ───────────────────────────────────────────────────────────────
+    "go__dominoes": {
+        "language": "go",
+        "exercise": "dominoes",
+        "files": {
+            "solution_stub": "dominoes.go",
+            "test": "dominoes_test.go",
+        },
+        "problem_statement": "Make a chain of dominoes.",
+    },
+    "go__book-store": {
+        "language": "go",
+        "exercise": "book-store",
+        "files": {
+            "solution_stub": "book_store.go",
+            "test": "book_store_test.go",
+        },
+        "problem_statement": "Calculate the lowest price for a shopping basket of books.",
+    },
+    # Rust tasks ─────────────────────────────────────────────────────────────
+    "rust__variable-length-quantity": {
+        "language": "rust",
+        "exercise": "variable-length-quantity",
+        "files": {
+            "solution_stub": "src/lib.rs",
+            "test": "tests/variable-length-quantity.rs",
+            "cargo": "Cargo.toml"
+        },
+        "problem_statement": "Implement variable length quantity encoding and decoding.",
+    },
+    "rust__bowling": {
+        "language": "rust",
+        "exercise": "bowling",
+        "files": {
+            "solution_stub": "src/lib.rs",
+            "test": "tests/bowling.rs",
+            "cargo": "Cargo.toml"
+        },
+        "problem_statement": "Score a bowling game.",
+    },
+    # Java tasks ─────────────────────────────────────────────────────────────
+    "java__sgf-parsing": {
+        "language": "java",
+        "exercise": "sgf-parsing",
+        "files": {
+            "solution_stub": "src/main/java/SgfParsing.java",
+            "test": "src/test/java/SgfParsingTest.java",
+        },
+        "problem_statement": "Parse Smart Game Format files.",
+    },
+    # C++ tasks ──────────────────────────────────────────────────────────────
+    "cpp__all-your-base": {
+        "language": "cpp",
+        "exercise": "all-your-base",
+        "files": {
+            "solution_stub": "all_your_base.cpp",
+            "header": "all_your_base.h",
+            "test": "all_your_base_test.cpp",
+        },
+        "problem_statement": "Convert a number, represented as a sequence of digits in one base, to any other base.",
+    },
 }
 
 
@@ -535,6 +596,53 @@ def run_javascript_test(task_dir: str) -> dict:
     return result
 
 
+def run_go_test(task_dir: str) -> dict:
+    print(f"    [go] Running go test in {task_dir}...")
+    if not os.path.exists(os.path.join(task_dir, "go.mod")):
+        _run_subprocess(["go", "mod", "init", "task"], cwd=task_dir, timeout=10)
+        _run_subprocess(["go", "mod", "tidy"], cwd=task_dir, timeout=10)
+    result = _run_subprocess(["go", "test", "-v"], cwd=task_dir, timeout=60)
+    return result
+
+
+def run_rust_test(task_dir: str) -> dict:
+    print(f"    [cargo] Running cargo test in {task_dir}...")
+    if not os.path.exists(os.path.join(task_dir, "Cargo.toml")):
+        return {"exit_code": -1, "stdout": "", "stderr": "No Cargo.toml found"}
+    result = _run_subprocess(["cargo", "test", "--quiet"], cwd=task_dir, timeout=180)
+    return result
+
+
+def run_java_test(task_dir: str) -> dict:
+    print(f"    [gradle] Running java test in {task_dir}...")
+    gradlew = "./gradlew" if os.name != "nt" else "gradlew.bat"
+    if not os.path.exists(os.path.join(task_dir, "build.gradle")):
+         return {"exit_code": -1, "stdout": "", "stderr": "No build.gradle found"}
+    if os.name != "nt":
+        _run_subprocess(["chmod", "+x", "gradlew"], cwd=task_dir, timeout=5)
+    result = _run_subprocess([gradlew, "test"], cwd=task_dir, timeout=180)
+    return result
+
+
+def run_cpp_test(task_dir: str) -> dict:
+    print(f"    [cmake] Running cpp test in {task_dir}...")
+    if not os.path.exists(os.path.join(task_dir, "CMakeLists.txt")):
+        return {"exit_code": -1, "stdout": "", "stderr": "No CMakeLists.txt found"}
+    build_dir = os.path.join(task_dir, "build")
+    os.makedirs(build_dir, exist_ok=True)
+    
+    cmake_result = _run_subprocess(["cmake", ".."], cwd=build_dir, timeout=60)
+    if cmake_result["exit_code"] != 0:
+         return {"exit_code": 1, "stdout": "", "stderr": f"CMake failed: {cmake_result['stderr'][:500]}"}
+         
+    make_result = _run_subprocess(["cmake", "--build", "."], cwd=build_dir, timeout=180)
+    if make_result["exit_code"] != 0:
+         return {"exit_code": 1, "stdout": "", "stderr": f"Make failed: {make_result['stderr'][:500]}"}
+         
+    ctest_result = _run_subprocess(["ctest", "-V"], cwd=build_dir, timeout=60)
+    return ctest_result
+
+
 # ---------------------------------------------------------------------------
 # Best Agent Selector
 # ---------------------------------------------------------------------------
@@ -697,6 +805,14 @@ def run_outer_eval(
             test_result = run_python_test(task_dir, os.path.basename(test_path))
         elif lang == "javascript":
             test_result = run_javascript_test(task_dir)
+        elif lang == "go":
+            test_result = run_go_test(task_dir)
+        elif lang == "rust":
+            test_result = run_rust_test(task_dir)
+        elif lang == "java":
+            test_result = run_java_test(task_dir)
+        elif lang == "cpp":
+            test_result = run_cpp_test(task_dir)
         else:
             test_result = {"exit_code": -1, "stdout": "", "stderr": "Language not supported"}
 
