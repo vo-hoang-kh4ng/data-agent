@@ -226,6 +226,7 @@ def download_task_files(task_id: str, dest_dir: str) -> dict:
             downloaded[role] = None
         else:
             dest_path = os.path.join(dest_dir, filename)
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             with open(dest_path, "w", encoding="utf-8") as f:
                 f.write(content)
             downloaded[role] = dest_path
