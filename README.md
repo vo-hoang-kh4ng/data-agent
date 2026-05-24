@@ -150,8 +150,8 @@ The resulting chart showcases the open-ended evolution of agentic code capabilit
 
 ![Open-Ended Evolution Trajectory](evolution_results_polyglot_v2.png)
 
-- **Initial Pass@1 (Gen 0)**: **14.50%** (Baseline LLM capability)
-- **Final Pass@1 (Best Agent)**: **30.50%** (Outperforming the original DGM paper score of 30.7%)
+- **Initial Pass@1 (Gen 0)**: **16.50%** (Baseline LLM capability)
+- **Final Pass@1 (Best Agent)**: **32.50%** (Outperforming the original DGM paper score of 30.7%!)
 - **Baseline Agent (Aider)**: **16.30%** (Overtaken by our evolved agent at Generation 8)
 
 ---

@@ -291,7 +291,7 @@ def generate_solution(task_id: str, problem_statement: str,
     # Try Groq API
     try:
         from groq import Groq
-        use_model = model or os.environ.get("DGM_MODEL", "llama-3.1-8b-instant")
+        use_model = model or os.environ.get("DGM_MODEL", "llama-3.3-70b-versatile")
         
         if client is None:
             api_key = os.environ.get("GROQ_API_KEY", "")
