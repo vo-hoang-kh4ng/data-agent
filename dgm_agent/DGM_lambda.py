@@ -338,12 +338,12 @@ class EvolutionaryScheduler:
                         mutation_prompt, 
                         target, 
                         model=budget["model"], 
-                        temperature=budget["temperature"],
+            temperature=budget["temperature"],
                         error_feedback=last_error
                     )
                     
                     # --- 3. VERIFIER: 4-stage evaluation (includes Epiplexity) ---
-                    eval_result = run_lambda_eval(sandbox_dir, budget)
+                    eval_result = run_lambda_eval(sandbox_dir, budget, task_description=task)
                     
                     if eval_result["is_valid"]:
                         print(f"  [Verifier] Attempt {retry+1} passed validation with score: {eval_result['score']}")
@@ -596,7 +596,7 @@ class EvolutionaryScheduler:
             logs += "🔬 [Verifier] Running 4-Stage Evaluation...\n"
             yield logs
             
-            eval_result = run_lambda_eval(sandbox_dir)
+            eval_result = run_lambda_eval(sandbox_dir, task_description=task)
             
             epi = eval_result.get("epiplexity_score", 0)
             status = eval_result.get("goldilocks_status", "N/A")
@@ -695,7 +695,7 @@ def dgm_evolution_loop_stream(repo_root):
     yield logs
     
     # 4. Evaluation Step (now with 4-stage pipeline including Epiplexity)
-    eval_result = run_lambda_eval(sandbox_dir)
+    eval_result = run_lambda_eval(sandbox_dir, task_description=prompt)
     logs += eval_result.get('stdout', '') + "\n"
     logs += eval_result.get('stderr', '') + "\n"
     
@@ -770,7 +770,7 @@ def dgm_evolution_loop(repo_root):
     print(f"Mutation applied: {mutation_log}")
     
     # 4. Evaluation Step (now with 4-stage pipeline including Epiplexity)
-    eval_result = run_lambda_eval(sandbox_dir)
+    eval_result = run_lambda_eval(sandbox_dir, task_description=prompt)
     
     # 5. Archive Decision
     if eval_result['is_valid']:
