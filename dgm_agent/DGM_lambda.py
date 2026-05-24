@@ -788,4 +788,4 @@ if __name__ == "__main__":
     
     # Use the new EvolutionaryScheduler for triadic evolution
     scheduler = EvolutionaryScheduler(repo_root)
-    scheduler.run_evolution_cycle(iterations=1)
+    scheduler.run_evolution_cycle(iterations=30)

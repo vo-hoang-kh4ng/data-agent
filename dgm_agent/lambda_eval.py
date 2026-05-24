@@ -98,51 +98,10 @@ def run_lambda_eval(sandbox_dir: str, budget: dict = None, task_description: str
     goldilocks = verdict["goldilocks_status"]
 
     # 2. Thực thi đánh giá trong Docker Sandbox cách ly (nếu khả dụng)
+    # [TỐI ƯU HÓA] Bỏ qua Docker trong Inner Loop để dùng Surrogate Model nhanh (tiết kiệm 30s timeout mỗi vòng)
     docker_success = False
-    if check_docker_available():
-        print("🐳 Kích hoạt Docker Sandbox cách ly bảo mật...")
-        try:
-            absolute_sandbox_dir = os.path.abspath(sandbox_dir)
-            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            
-            # Đảm bảo Docker image được build
-            dockerfile_path = os.path.join(repo_root, "Dockerfile.sandbox")
-            subprocess.run(
-                ["docker", "build", "-t", "lambda-sandbox", "-f", dockerfile_path, repo_root],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30
-            )
 
-            # Khởi chạy Docker với cấu hình bảo mật cực cao
-            cmd = [
-                "docker", "run", "--rm",
-                "--network", "none",
-                "--memory", "512m",
-                "--cpus", "1.0",
-                "-v", f"{repo_root}:/repo_root",
-                "-v", f"{absolute_sandbox_dir}:/sandbox",
-                "lambda-sandbox",
-                "python", "-c",
-                f"import sys, os, json; sys.path.insert(0, '/sandbox'); sys.path.insert(0, '/repo_root'); from dgm_agent.lambda_eval import run_local_eval; print(json.dumps(run_local_eval('/sandbox', {budget})))"
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
-            if result.returncode == 0:
-                # Trích xuất và parse JSON trả về từ docker container
-                stdout_str = result.stdout.strip()
-                for line in reversed(stdout_str.split("\n")):
-                    if line.startswith("{") and line.endswith("}"):
-                        eval_data = json.loads(line)
-                        if eval_data.get("success", False):
-                            score = eval_data.get("score", 0.5)
-                            stderr = eval_data.get("stderr", "")
-                            docker_success = True
-                            break
-            else:
-                print(f"⚠️ Docker run lỗi (code {result.returncode}), đang chuyển sang chế độ tự bảo vệ fallback...")
-        except Exception as docker_err:
-            print(f"⚠️ Không thể thực thi Docker Sandbox: {docker_err}. Đang kích hoạt Fallback...")
-
-    # 3. Fallback sang Local Evaluation nếu Docker bị tắt hoặc lỗi
+    # 3. Fallback: Nếu Docker thất bại hoặc bị vô hiệu hóa, chạy Local SAEA Evaluator
     if not docker_success:
         print("💻 Đang chạy ở chế độ Host-Fallback cục bộ...")
         res = run_local_eval(sandbox_dir, budget)

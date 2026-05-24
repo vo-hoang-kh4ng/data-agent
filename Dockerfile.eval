@@ -1,0 +1,35 @@
+# Sử dụng Ubuntu làm base image
+FROM ubuntu:22.04
+
+# Tránh các prompt tương tác khi cài đặt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Cài đặt các Compilers và Runtimes cơ bản
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    golang-go \
+    openjdk-17-jdk \
+    g++ cmake make \
+    curl gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cài đặt Node.js v20 (Phiên bản mới để hỗ trợ Jest ES modules)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cài đặt Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Cài đặt các thư viện Python cho Agent của bác
+COPY requirements.txt /app/
+WORKDIR /app
+# Remove version pinning that causes conflicts, just install pytest and dotenv
+RUN pip3 install --no-cache-dir pytest python-dotenv groq
+
+# Copy toàn bộ mã nguồn vào Container
+COPY . /app/
+
+# Chạy script Outer Loop (dùng outer_eval.py mới thay vì DGM_outer.py cũ)
+CMD ["python3", "dgm_agent/outer_eval.py"]

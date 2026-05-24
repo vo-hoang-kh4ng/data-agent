@@ -26,10 +26,10 @@
 #   base_url_* : "https://api.openai.com/v1"
 #   api_key : "sk-xxxxxxx"
 
-# --- Cấu hình hiện tại (đã chuyển sang Groq API - Llama 3.3 70B) ---
-conv_model : "llama-3.3-70b-versatile"
-programmer_model : "llama-3.3-70b-versatile"
-inspector_model : "llama-3.3-70b-versatile"
+# --- Cấu hình hiện tại (đã chuyển sang Groq API - Llama 3.1 8B để tránh Rate Limit 70B) ---
+conv_model : "llama-3.1-8b-instant"   # Groq Model (8B cực nhanh, hạn mức TPD 500k cao gấp 5 lần)
+programmer_model : "llama-3.1-8b-instant"
+inspector_model : "llama-3.1-8b-instant"
 api_key : "YOUR_GROQ_API_KEY_HERE"
 base_url_conv_model : 'https://api.groq.com/openai/v1'   # Groq API server
 base_url_programmer : 'https://api.groq.com/openai/v1'
