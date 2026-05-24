@@ -18,6 +18,7 @@ To prevent evolutionary collapse (plateauing) on increasingly difficult coding t
 1. **Epiplexity (Information-Theoretic MDL Filter)**: Evaluates candidate code mutations by measuring the Minimum Description Length (MDL) of the agent's code under the Goldilocks zone.
 2. **Dynamic Compute Budgeting**: Dynamically inflates candidate generation (`num_candidates`) and debugging retry thresholds (`max_retries`) on highly complex tasks to avoid premature termination of reasoning.
 3. **Proactive Information Seeking**: Integrates the project's static codebase **Knowledge Graph** directly into the Proposer agent, forcing the evolution engine to actively patch and optimize weak architectural components.
+4. **MDL-Guided Memory Bank (RIMRULE)**: Empowers the Outer Loop with a self-learning memory system. After successfully fixing a bug via Reflexion, the agent extracts a concise heuristic rule, scores it using the Minimum Description Length (MDL) principle (balancing model cost and empirical data cost), and stores it in a global Rule Library. These high-value rules are subsequently injected into future prompts to enable cross-language Transfer Learning and prevent recurring systemic errors.
 
 ---
 
@@ -40,7 +41,8 @@ LAMBDA/
 │   ├── programmer.py                # SOLVER Agent: writes python solutions
 │   ├── inspector.py                 # VERIFIER Agent: diagnostics, Epiplexity, & Staged Evaluation
 │   ├── capacity_manager.py          # Dynamic Compute Budgeting controller
-│   └── proposer.py                  # PROPOSER Agent: mines Knowledge Graph for context
+│   ├── proposer.py                  # PROPOSER Agent: mines Knowledge Graph for context
+│   └── rule_generator.py            # RIMRULE Memory Bank: extracts and scores reusable rules via MDL
 │
 ├── 📂 ui/                           # GIAO DIỆN WEB (Gradio & Static Assets)
 │   ├── app.py                       # Main Gradio application layouts & tabs

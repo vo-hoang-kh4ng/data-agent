@@ -3,6 +3,7 @@ FROM ubuntu:22.04
 
 # Tránh các prompt tương tác khi cài đặt
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONIOENCODING=utf-8
 
 # Cài đặt các Compilers và Runtimes cơ bản
 RUN apt-get update && apt-get install -y \

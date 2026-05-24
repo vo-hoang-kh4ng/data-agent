@@ -33,6 +33,10 @@ import sys
 import tempfile
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.rule_generator import RuleLibrary, extract_rule_from_reflexion
+
+
 # ---------------------------------------------------------------------------
 # Exercism Task Definitions
 # Tasks are downloaded from the official exercism GitHub organization.
@@ -241,7 +245,8 @@ def download_task_files(task_id: str, dest_dir: str) -> dict:
 
 def generate_solution(task_id: str, problem_statement: str,
                        stub_path: str | None, model: str = None,
-                       previous_code: str = None, previous_error: str = None) -> str:
+                       previous_code: str = None, previous_error: str = None,
+                       injected_rules: str = None, client = None) -> str:
     """
     Call Groq (or mock) LLM to generate a solution for the task.
     Supports Reflexion (Test-Driven Self-Correction) if previous_error is provided.
@@ -263,10 +268,14 @@ def generate_solution(task_id: str, problem_statement: str,
         "The code must pass all unit tests."
     )
     
+    rules_text = ""
+    if injected_rules:
+        rules_text = f"\n\n[RIMRULE MEMORY BANK]\nHere are some learned rules from past mistakes to keep in mind:\n{injected_rules}\n"
+    
     if previous_code and previous_error:
         user_prompt = (
             f"Exercise: {exercise}\n\n"
-            f"Problem:\n{problem_statement}\n\n"
+            f"Problem:\n{problem_statement}{rules_text}\n\n"
             f"You previously generated this code:\n```\n{previous_code}\n```\n\n"
             f"However, it failed the tests with this error:\n```\n{previous_error}\n```\n\n"
             f"Please fix the code to pass the tests. Write ONLY the corrected {lang} implementation code."
@@ -274,7 +283,7 @@ def generate_solution(task_id: str, problem_statement: str,
     else:
         user_prompt = (
             f"Exercise: {exercise}\n\n"
-            f"Problem:\n{problem_statement}\n\n"
+            f"Problem:\n{problem_statement}{rules_text}\n\n"
             f"Current stub:\n{stub_content}\n\n"
             f"Write a complete, correct {lang} implementation."
         )
@@ -282,11 +291,14 @@ def generate_solution(task_id: str, problem_statement: str,
     # Try Groq API
     try:
         from groq import Groq
-        api_key = os.environ.get("GROQ_API_KEY", "")
-        if not api_key or api_key == "YOUR_GROQ_API_KEY_HERE":
-            raise ValueError("No valid GROQ_API_KEY")
-        client = Groq(api_key=api_key)
-        use_model = model or os.environ.get("DGM_MODEL", "llama-3.3-70b-versatile")
+        use_model = model or os.environ.get("DGM_MODEL", "llama-3.1-8b-instant")
+        
+        if client is None:
+            api_key = os.environ.get("GROQ_API_KEY", "")
+            if not api_key or api_key == "YOUR_GROQ_API_KEY_HERE":
+                raise ValueError("No valid GROQ_API_KEY")
+            client = Groq(api_key=api_key)
+            
         print(f"    [llm] Calling Groq ({use_model}) for {task_id}...")
         resp = client.chat.completions.create(
             model=use_model,
@@ -739,6 +751,11 @@ def run_outer_eval(
     # 5. Evaluate each task
     print("\n[Step 5] Running evaluations...\n")
     results = []
+    
+    rule_library = RuleLibrary()
+    from groq import Groq
+    groq_api_key = os.environ.get("GROQ_API_KEY", "")
+    llm_client = Groq(api_key=groq_api_key) if groq_api_key and groq_api_key != "YOUR_GROQ_API_KEY_HERE" else None
 
     for task_id in task_ids:
         print(f"{'─'*60}")
@@ -800,6 +817,10 @@ def run_outer_eval(
         error_log = None
         
         mode = "reference" if use_reference else "LLM"
+        injected_rules = rule_library.get_top_rules(top_k=3)
+        if injected_rules:
+            print(f"  [RIMRULE] Injecting top learned rules from Memory Bank...")
+            
         for attempt in range(max_retries):
             if attempt == 0:
                 print(f"  Generating solution ({mode}, Gen {best_agent.get('cycle', 0)})...")
@@ -811,16 +832,25 @@ def run_outer_eval(
                         meta["problem_statement"],
                         stub_path,
                         model=groq_model,
+                        injected_rules=injected_rules,
+                        client=llm_client
                     )
             else:
                 print(f"  [Reflexion] Attempt {attempt+1}/{max_retries} - Fixing previous errors...")
+                rule_library.add_error_encountered()
+                
+                # Store the failed code to generate rules later
+                failed_code = solution_code
+                
                 solution_code = generate_solution(
                     task_id,
                     meta["problem_statement"],
                     stub_path,
                     model=groq_model,
                     previous_code=solution_code,
-                    previous_error=error_log
+                    previous_error=error_log,
+                    injected_rules=injected_rules,
+                    client=llm_client
                 )
 
             # Write solution to solution file
@@ -854,6 +884,13 @@ def run_outer_eval(
             print(f"  Result: {status_str} (exit_code={test_result['exit_code']})")
             
             if passed:
+                if attempt > 0 and llm_client is not None:
+                    # Successful Reflexion! Extract a rule to remember.
+                    print("  [RIMRULE] Reflexion successful. Extracting generalizable rule...")
+                    new_rule = extract_rule_from_reflexion(failed_code, error_log, solution_code, client=llm_client)
+                    if new_rule:
+                        rule_library.add_or_update_rule(new_rule)
+                        print(f"  [RIMRULE] Rule added to Memory Bank: {new_rule}")
                 break
             
             # Prepare error log for next Reflexion attempt

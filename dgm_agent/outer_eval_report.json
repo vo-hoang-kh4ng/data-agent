@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2026-05-24T15:37:12.223786",
+    "timestamp": "2026-05-24T16:58:30.896374",
     "evaluation_type": "outer_loop_real_compiler",
     "solver_mode": "groq-llm",
     "description": "Outer Loop evaluation using real compilers. Solver: groq-llm",
@@ -27,9 +27,9 @@
       "status": "FAIL",
       "reason": "Real compiler test",
       "pass": false,
-      "exit_code": 2,
-      "stdout_snippet": "FAIL\ttask [build failed]\n",
-      "stderr_snippet": "# task [task.test]\n./dominoes_test.go:11:21: undefined: testCases\n./dominoes_test.go:17:7: non-boolean condition in if statement\n./dominoes_test.go:50:17: cannot range over len(chain) - 1 (value of type int)\n./dominoes_test.go:51:14: invalid operation: cannot index chain[i] (variable of type Domino)\n./dominoes_test.go:51:31: invalid operation: cannot index chain[i + 1] (variable of type Domino)\n./dominoes_test.go:56:13: invalid operation: cannot index chain[0] (variable of type Domino)\n./dominoe"
+      "exit_code": 1,
+      "stdout_snippet": "",
+      "stderr_snippet": "dominoes.go:1:1: expected 'package', found ``\n"
     },
     {
       "task_id": "cpp__all-your-base",
@@ -48,7 +48,7 @@
       "reason": "Real compiler test",
       "pass": false,
       "exit_code": 1,
-      "stdout_snippet": "============================= test session starts ==============================\nplatform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /usr/bin/python3\ncachedir: .pytest_cache\nrootdir: /tmp/dgm_outer_eval_2817axpa/python__dominoes\nplugins: anyio-4.13.0\ncollecting ... collected 13 items\n\ndominoes_test.py::DominoesTest::test_can_reverse_dominoes FAILED         [  7%]\n\n=================================== FAILURES ===================================\n____________________ DominoesTest.test_c",
+      "stdout_snippet": "============================= test session starts ==============================\nplatform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /usr/bin/python3\ncachedir: .pytest_cache\nrootdir: /tmp/dgm_outer_eval_peezqfig/python__dominoes\nplugins: anyio-4.13.0\ncollecting ... collected 13 items\n\ndominoes_test.py::DominoesTest::test_can_reverse_dominoes FAILED         [  7%]\n\n=================================== FAILURES ===================================\n____________________ DominoesTest.test_c",
       "stderr_snippet": ""
     },
     {
@@ -64,22 +64,22 @@
     {
       "task_id": "javascript__robot-name",
       "language": "javascript",
-      "status": "PASS",
+      "status": "FAIL",
       "reason": "Real compiler test",
-      "pass": true,
-      "exit_code": 0,
+      "pass": false,
+      "exit_code": 1,
       "stdout_snippet": "",
-      "stderr_snippet": "(node:859) ExperimentalWarning: VM Modules is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nPASS ./robot-name.spec.js\n  Robot\n    ✓ has a name (2 ms)\n    ○ skipped name is the same each time\n    ○ skipped different robots have different names\n    ○ skipped is able to reset the name\n    ○ skipped should set a unique name after reset\n    ○ skipped internal name cannot be modified\n    ○ skipped new names should not be se"
+      "stderr_snippet": "(node:1101) ExperimentalWarning: VM Modules is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nFAIL ./robot-name.spec.js\n  Robot\n    ✕ has a name (2 ms)\n    ○ skipped name is the same each time\n    ○ skipped different robots have different names\n    ○ skipped is able to reset the name\n    ○ skipped should set a unique name after reset\n    ○ skipped internal name cannot be modified\n    ○ skipped new names should not be s"
     },
     {
       "task_id": "rust__variable-length-quantity",
       "language": "rust",
-      "status": "PASS",
+      "status": "FAIL",
       "reason": "Real compiler test",
-      "pass": true,
-      "exit_code": 0,
-      "stdout_snippet": "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 31 tests\niiiiiiiiiiiiiiiiiiiiiiiiiiiiii.\ntest result: ok. 1 passed; 0 failed; 30 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
-      "stderr_snippet": ""
+      "pass": false,
+      "exit_code": 101,
+      "stdout_snippet": "",
+      "stderr_snippet": "error[E0255]: the name `Error` is defined multiple times\n --> src/lib.rs:3:1\n  |\n1 | use std::error::Error;\n  |     ----------------- previous import of the trait `Error` here\n2 |\n3 | enum Error {\n  | ^^^^^^^^^^ `Error` redefined here\n  |\n  = note: `Error` must be defined only once in the type namespace of this module\nhelp: you can use `as` to change the binding name of the import\n  |\n1 | use std::error::Error as OtherError;\n  |                       +++++++++++++\n\nwarning: unused import: `std::"
     },
     {
       "task_id": "python__beer-song",
@@ -88,7 +88,7 @@
       "reason": "Real compiler test",
       "pass": false,
       "exit_code": 1,
-      "stdout_snippet": "============================= test session starts ==============================\nplatform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /usr/bin/python3\ncachedir: .pytest_cache\nrootdir: /tmp/dgm_outer_eval_2817axpa/python__beer-song\nplugins: anyio-4.13.0\ncollecting ... collected 8 items\n\nbeer_song_test.py::BeerSongTest::test_all_verses FAILED                  [ 12%]\n\n=================================== FAILURES ===================================\n_________________________ BeerSongTest.t",
+      "stdout_snippet": "============================= test session starts ==============================\nplatform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /usr/bin/python3\ncachedir: .pytest_cache\nrootdir: /tmp/dgm_outer_eval_peezqfig/python__beer-song\nplugins: anyio-4.13.0\ncollecting ... collected 8 items\n\nbeer_song_test.py::BeerSongTest::test_all_verses FAILED                  [ 12%]\n\n=================================== FAILURES ===================================\n_________________________ BeerSongTest.t",
       "stderr_snippet": ""
     },
     {
@@ -109,7 +109,7 @@
       "pass": false,
       "exit_code": 1,
       "stdout_snippet": "",
-      "stderr_snippet": "(node:1807) ExperimentalWarning: VM Modules is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nFAIL ./bottle-song.spec.js\n  Bottle Song\n    verse\n      single verse\n        ✕ first generic verse (5 ms)\n        ○ skipped last generic verse\n        ○ skipped verse with 2 bottles\n        ○ skipped verse with 1 bottle\n    lyrics\n      multiple verses\n        ○ skipped first two verses\n        ○ skipped last three verses\n   "
+      "stderr_snippet": " 5 down there are 5 bottles hanging on the wall.\n    + 4 bottles hanging on the wall, 4 bottles hanging on the wall. take 4 down there are 4 bottles hanging on the wall.\n    + 3 bottles hanging on the wall, 3 bottles hanging on the wall. take 3 down there are 3 bottles hanging on the wall.\n    + 2 bottles hanging on the wall, 2 bottles hanging on the wall. take 2 down there are 2 bottles hanging on the wall.\n    + one bottle hanging on the wall, one bottle hanging on the wall. take one down ther"
     },
     {
       "task_id": "rust__bowling",
@@ -119,17 +119,17 @@
       "pass": false,
       "exit_code": 101,
       "stdout_snippet": "",
-      "stderr_snippet": "error: unknown start of token: `\n --> src/lib.rs:1:1\n  |\n1 | ```rust\n  | ^^^\n  |\n  = note: character appears 2 more times\nhelp: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not\n  |\n1 - ```rust\n1 + '''rust\n  |\n\nerror: unknown start of token: `\n  --> src/lib.rs:68:1\n   |\n68 | ```\n   | ^^^\n   |\n   = note: character appears 2 more times\nhelp: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not\n   |\n68 - ```\n68 + '''\n   |\n\nerror: expected"
+      "stderr_snippet": "error: unknown start of token: `\n --> src/lib.rs:1:1\n  |\n1 | ```rust\n  | ^^^\n  |\n  = note: character appears 2 more times\nhelp: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not\n  |\n1 - ```rust\n1 + '''rust\n  |\n\nerror: unknown start of token: `\n  --> src/lib.rs:78:1\n   |\n78 | ```\n   | ^^^\n   |\n   = note: character appears 2 more times\nhelp: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not\n   |\n78 - ```\n78 + '''\n   |\n\nerror: expected"
     }
   ],
   "summary": {
     "total_tasks": 10,
     "attempted_tasks": 10,
     "skipped_tasks": 0,
-    "resolved_tasks": 2,
-    "failed_tasks": 8,
-    "pass_at_1": 0.2,
-    "pass_at_1_pct": 20.0
+    "resolved_tasks": 0,
+    "failed_tasks": 10,
+    "pass_at_1": 0.0,
+    "pass_at_1_pct": 0.0
   },
   "academic_note": "Pass@1 computed on the subset of tasks where compilers were available on the host machine (Python, Node.js). Tasks requiring Go, Rust, C++, or Java were skipped due to missing compiler installation. Evaluation conducted locally without Docker as a proof-of-concept Outer Loop."
 }
