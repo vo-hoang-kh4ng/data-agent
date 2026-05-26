@@ -49,9 +49,9 @@ The evaluation was executed on the full 60-task Polyglot Benchmark using the **Q
 
 ### Visualized Results
 
-![Polyglot Pass Rates by Language](dgm_agent/analysis/output/polyglot_pass_rates.png)
+![Polyglot Pass Rates by Language](./polyglot_pass_rates.png)
 
-![Transparent Task Status Matrix Grid](dgm_agent/analysis/output/task_status_matrix.png)
+![Transparent Task Status Matrix Grid](./task_status_matrix.png)
 
 ### Academic Analysis
 The **46.7% empirical score** achieved by Triadic DGM marks a significant improvement over standard zero-shot baselines and the original DGM paper (31.6% SOTA). 
