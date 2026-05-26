@@ -159,6 +159,12 @@ The evaluation on the full 60-task Polyglot Benchmark under secure Docker sandbo
 * **Go**: 1/10 (10.0%)
 * **C++**: 0/5 (0.0%) *(Boost library dependency constraints)*
 
+### Performance Visualizations:
+
+![Polyglot Pass Rates by Language](dgm_agent/analysis/output/polyglot_pass_rates.png)
+
+![Transparent Task Status Matrix Grid](dgm_agent/analysis/output/task_status_matrix.png)
+
 ---
 
 ## 📝 BibTeX Citation
