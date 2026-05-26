@@ -26,14 +26,20 @@
 #   base_url_* : "https://api.openai.com/v1"
 #   api_key : "sk-xxxxxxx"
 
-# --- Cấu hình hiện tại (Groq API) ---
-conv_model : "llama-3.3-70b-versatile"
-programmer_model : "llama-3.1-8b-instant"
-inspector_model : "llama-3.1-8b-instant"
-api_key : "YOUR_GROQ_API_KEY_HERE"
-base_url_conv_model : 'https://api.groq.com/openai/v1'   # Groq API server
-base_url_programmer : 'https://api.groq.com/openai/v1'
-base_url_inspector : 'https://api.groq.com/openai/v1'
+# === Option 5: Qwen Proxy API ===
+# Dùng API key từ proxy Qwen3.5:
+#   conv_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
+#   base_url_* : "https://proxy.onebot.meobeo.ai/v1"
+#   api_key : (đọc từ file .env biến QWEN_API_KEY)
+
+# --- Cấu hình hiện tại ---
+conv_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
+programmer_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
+inspector_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
+api_key_env_var : "QWEN_API_KEY"
+base_url_conv_model : 'https://proxy.onebot.meobeo.ai/v1'
+base_url_programmer : 'https://proxy.onebot.meobeo.ai/v1'
+base_url_inspector : 'https://proxy.onebot.meobeo.ai/v1'
 
 
 #================================================================================================

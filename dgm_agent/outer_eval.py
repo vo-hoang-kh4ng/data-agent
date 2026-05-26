@@ -34,6 +34,10 @@ import tempfile
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 from core.rule_generator import RuleLibrary, extract_rule_from_reflexion
 
 
@@ -216,14 +220,24 @@ def download_task_files(task_id: str, dest_dir: str) -> dict:
 
     for role, filename in files.items():
         url = _exercism_url(lang, exercise, filename)
-        content = _fetch_raw(url)
-        if content is None:
+        is_binary = filename.endswith(".jar") or filename.endswith(".zip")
+        content = None
+        
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "DGM-Outer-Eval/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                content = resp.read()
+        except Exception as e:
             # Try alternate path (some exercises use underscores vs hyphens)
             alt_filename = filename.replace("-", "_")
             url = _exercism_url(lang, exercise, alt_filename)
-            content = _fetch_raw(url)
-            if content is not None:
-                filename = alt_filename
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "DGM-Outer-Eval/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    content = resp.read()
+                    filename = alt_filename
+            except Exception:
+                pass
 
         if content is None:
             print(f"    [download] SKIP {task_id}/{filename} — not reachable")
@@ -231,12 +245,189 @@ def download_task_files(task_id: str, dest_dir: str) -> dict:
         else:
             dest_path = os.path.join(dest_dir, filename)
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-            with open(dest_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            if is_binary:
+                with open(dest_path, "wb") as f:
+                    f.write(content)
+            else:
+                try:
+                    text_content = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    text_content = content.decode("latin-1")
+                with open(dest_path, "w", encoding="utf-8") as f:
+                    f.write(text_content)
             downloaded[role] = dest_path
             print(f"    [download] OK {task_id}/{filename}")
 
     return downloaded
+
+
+def get_task_meta_dynamically(task_id: str) -> dict:
+    """Dynamically construct metadata for a task not present in TASK_REGISTRY."""
+    if task_id in TASK_REGISTRY:
+        return TASK_REGISTRY[task_id]
+
+    parts = task_id.split("__")
+    lang = parts[0]
+    exercise = parts[1] if len(parts) > 1 else task_id
+
+    # Standard file layout based on language
+    files = {}
+    exercise_underscore = exercise.replace("-", "_")
+    if lang == "python":
+        files = {
+            "solution_stub": f"{exercise_underscore}.py",
+            "test": f"{exercise_underscore}_test.py"
+        }
+    elif lang == "javascript":
+        files = {
+            "solution_stub": f"{exercise}.js",
+            "test": f"{exercise}.spec.js"
+        }
+    elif lang == "go":
+        files = {
+            "solution_stub": f"{exercise_underscore}.go",
+            "test": f"{exercise_underscore}_test.go"
+        }
+    elif lang == "rust":
+        files = {
+            "solution_stub": "src/lib.rs",
+            "test": f"tests/{exercise}.rs",
+            "cargo": "Cargo.toml"
+        }
+    elif lang == "java":
+        # Query GitHub API to get the correct filenames in src/main/java and src/test/java
+        main_files = []
+        test_files = []
+        try:
+            url_main = f"https://api.github.com/repos/exercism/java/contents/exercises/practice/{exercise}/src/main/java"
+            req = urllib.request.Request(url_main, headers={"User-Agent": "DGM-Outer-Eval/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                main_files = [f["name"] for f in data if f["name"].endswith(".java")]
+        except Exception:
+            pass
+
+        try:
+            url_test = f"https://api.github.com/repos/exercism/java/contents/exercises/practice/{exercise}/src/test/java"
+            req = urllib.request.Request(url_test, headers={"User-Agent": "DGM-Outer-Eval/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                test_files = [f["name"] for f in data if f["name"].endswith(".java")]
+        except Exception:
+            pass
+
+        files = {}
+        if main_files:
+            files["solution_stub"] = f"src/main/java/{main_files[0]}"
+        else:
+            camel_case = "".join(w.capitalize() for w in exercise.replace("-", "_").split("_"))
+            files["solution_stub"] = f"src/main/java/{camel_case}.java"
+
+        if test_files:
+            files["test"] = f"src/test/java/{test_files[0]}"
+            for idx, tf in enumerate(test_files[1:]):
+                files[f"test_{idx}"] = f"src/test/java/{tf}"
+        else:
+            camel_case = "".join(w.capitalize() for w in exercise.replace("-", "_").split("_"))
+            files["test"] = f"src/test/java/{camel_case}Test.java"
+
+        files["build_gradle"] = "build.gradle"
+        files["gradlew"] = "gradlew"
+        files["gradlew_bat"] = "gradlew.bat"
+        files["gradle_wrapper_jar"] = "gradle/wrapper/gradle-wrapper.jar"
+        files["gradle_wrapper_properties"] = "gradle/wrapper/gradle-wrapper.properties"
+    elif lang == "cpp":
+        files = {
+            "solution_stub": f"{exercise_underscore}.cpp",
+            "header": f"{exercise_underscore}.h",
+            "test": f"{exercise_underscore}_test.cpp"
+        }
+    else:
+        files = {
+            "solution_stub": f"{exercise_underscore}.py",
+            "test": f"{exercise_underscore}_test.py"
+        }
+
+    # Fetch instructions dynamically from Exercism main repo
+    # Standard path: .docs/instructions.md
+    instructions_url = f"{EXERCISM_BASE}/{lang}/main/exercises/practice/{exercise}/.docs/instructions.md"
+    instructions = _fetch_raw(instructions_url)
+
+    # Try alternate path just in case
+    if instructions is None:
+        instructions_url_alt = f"{EXERCISM_BASE}/{lang}/main/exercises/practice/{exercise_underscore}/.docs/instructions.md"
+        instructions = _fetch_raw(instructions_url_alt)
+
+    if instructions is None:
+        # Try introduction.md or a generic fallback
+        introduction_url = f"{EXERCISM_BASE}/{lang}/main/exercises/practice/{exercise}/.docs/introduction.md"
+        instructions = _fetch_raw(introduction_url)
+
+    if instructions is None:
+        instructions = f"Solve the {exercise} problem in {lang}."
+
+    meta = {
+        "language": lang,
+        "exercise": exercise,
+        "files": files,
+        "problem_statement": instructions
+    }
+
+    # Cache it in TASK_REGISTRY
+    TASK_REGISTRY[task_id] = meta
+    return meta
+
+
+def save_checkpoint(output_path: str, results: list, task_ids: list,
+                    available_langs: dict, best_agent: dict, solver_mode: str):
+    attempted = [r for r in results if r["status"] != "SKIPPED"]
+    resolved = [r for r in results if r["pass"]]
+    skipped = [r for r in results if r["status"] == "SKIPPED"]
+    pass_at_1 = len(resolved) / len(attempted) if attempted else 0.0
+
+    report = {
+        "metadata": {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "evaluation_type": "outer_loop_real_compiler",
+            "solver_mode": solver_mode,
+            "description": f"Outer Loop evaluation using real compilers. Solver: {solver_mode}",
+            "best_agent": {
+                "cycle": best_agent.get("cycle", 0),
+                "score": best_agent.get("score", 0),
+                "epiplexity_score": best_agent.get("epiplexity_score", 0),
+                "goldilocks_status": best_agent.get("goldilocks_status", "N/A"),
+                "context_node": best_agent.get("context_node", "N/A"),
+            },
+            "checkpoint": f"Evaluated {len(results)}/{len(task_ids)} tasks",
+        },
+        "compiler_availability": available_langs,
+        "task_results": results,
+        "summary": {
+            "total_tasks": len(task_ids),
+            "attempted_tasks": len(attempted),
+            "skipped_tasks": len(skipped),
+            "resolved_tasks": len(resolved),
+            "failed_tasks": len(attempted) - len(resolved),
+            "pass_at_1": round(pass_at_1, 4),
+            "pass_at_1_pct": round(pass_at_1 * 100, 2),
+        },
+        "academic_note": (
+            "Pass@1 computed on the subset of tasks where compilers were available "
+            "on the host machine (Python, Node.js). Tasks requiring Go, Rust, C++, "
+            "or Java were skipped due to missing compiler installation. "
+            "Evaluation conducted locally without Docker as a proof-of-concept Outer Loop."
+        ),
+    }
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True) if os.path.dirname(output_path) else None
+    tmp_output = output_path + ".tmp"
+    try:
+        with open(tmp_output, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_output, output_path)
+        print(f"  [Checkpoint] Saved progress to {output_path} ({len(results)}/{len(task_ids)} tasks)")
+    except Exception as e:
+        print(f"  [Checkpoint] WARNING: Failed to save progress: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -246,10 +437,12 @@ def download_task_files(task_id: str, dest_dir: str) -> dict:
 def generate_solution(task_id: str, problem_statement: str,
                        stub_path: str | None, model: str = None,
                        previous_code: str = None, previous_error: str = None,
-                       injected_rules: str = None, client = None) -> str:
+                       injected_rules: str = None, client = None,
+                       test_file_content: str = None, n_candidates: int = 1) -> str:
     """
     Call Groq (or mock) LLM to generate a solution for the task.
     Supports Reflexion (Test-Driven Self-Correction) if previous_error is provided.
+    Supports Best-of-N search if n_candidates > 1.
     Returns the code as a string.
     """
     # Load existing stub for context
@@ -264,62 +457,166 @@ def generate_solution(task_id: str, problem_statement: str,
 
     system_prompt = (
         f"You are an expert {lang} programmer solving Exercism exercises. "
-        "Write ONLY the implementation code — no explanations, no markdown fences. "
-        "The code must pass all unit tests."
     )
+    if n_candidates > 1:
+        system_prompt += (
+            f"You MUST provide exactly {n_candidates} different coding approaches to solve this problem. "
+            "For each approach, wrap the code in a distinct block labeled [APPROACH X] where X is 1, 2, etc. "
+            "Example format:\n[APPROACH 1]\n<raw code here>\n\n[APPROACH 2]\n<raw code here>\n"
+            "CRITICAL: Output ONLY raw code under each approach header, no markdown fences (```)."
+        )
+    else:
+        system_prompt += (
+            "Write ONLY the raw implementation code. "
+            "CRITICAL: Do NOT wrap the code in markdown fences (``` or ```python etc). "
+            "Output the raw code directly with NO surrounding backticks. "
+            "The code must compile and pass all unit tests."
+        )
     
     rules_text = ""
     if injected_rules:
         rules_text = f"\n\n[RIMRULE MEMORY BANK]\nHere are some learned rules from past mistakes to keep in mind:\n{injected_rules}\n"
     
+    # Include test file content so LLM knows expected API signatures
+    test_context = ""
+    if test_file_content:
+        # Truncate very long test files to save tokens
+        truncated = test_file_content[:3000]
+        test_context = f"\n\nThe test file that your code must pass (study the expected function signatures and types):\n```\n{truncated}\n```\n"
+    
     if previous_code and previous_error:
         user_prompt = (
             f"Exercise: {exercise}\n\n"
-            f"Problem:\n{problem_statement}{rules_text}\n\n"
+            f"Problem:\n{problem_statement}{rules_text}{test_context}\n\n"
             f"You previously generated this code:\n```\n{previous_code}\n```\n\n"
             f"However, it failed the tests with this error:\n```\n{previous_error}\n```\n\n"
-            f"Please fix the code to pass the tests. Write ONLY the corrected {lang} implementation code."
+            f"Please fix the code to pass the tests. Write ONLY the corrected {lang} implementation code, no markdown fences."
         )
     else:
+        candidates_str = f" Write {n_candidates} distinct approaches labeled [APPROACH X]." if n_candidates > 1 else ""
         user_prompt = (
             f"Exercise: {exercise}\n\n"
-            f"Problem:\n{problem_statement}{rules_text}\n\n"
+            f"Problem:\n{problem_statement}{rules_text}{test_context}\n\n"
             f"Current stub:\n{stub_content}\n\n"
-            f"Write a complete, correct {lang} implementation."
+            f"Write a complete, correct {lang} implementation.{candidates_str} Output ONLY raw code, no markdown fences."
         )
 
-    # Try Groq API
-    try:
-        from groq import Groq
-        use_model = model or os.environ.get("DGM_MODEL", "llama-3.3-70b-versatile")
-        
-        if client is None:
-            api_key = os.environ.get("GROQ_API_KEY", "")
-            if not api_key or api_key == "YOUR_GROQ_API_KEY_HERE":
-                raise ValueError("No valid GROQ_API_KEY")
-            client = Groq(api_key=api_key)
+    # Try Custom OpenAI API with Retry Logic for Rate Limits
+    import time
+    max_api_retries = 5
+    for api_attempt in range(max_api_retries):
+        try:
+            if client is None:
+                import yaml
+                from dotenv import load_dotenv
+                from openai import OpenAI
+                
+                load_dotenv()
+                config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                    
+                api_key_env_var = config.get("api_key_env_var", "QWEN_API_KEY")
+                api_key = os.environ.get(api_key_env_var, "")
+                base_url = config.get("base_url_conv_model", "https://proxy.onebot.meobeo.ai/v1")
+                
+                client = OpenAI(api_key=api_key, base_url=base_url)
+                
+                if not model:
+                    model = config.get("conv_model", "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8")
+                    
+            use_model = model
+                
+            print(f"    [llm] Calling LLM ({use_model}) for {task_id} (Attempt {api_attempt+1})...")
+            resp = client.chat.completions.create(
+                model=use_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=4096,
+                extra_body={
+                    "cache": {"no-cache": True},
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
+            )
+            raw = resp.choices[0].message.content.strip()
             
-        print(f"    [llm] Calling Groq ({use_model}) for {task_id}...")
-        resp = client.chat.completions.create(
-            model=use_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            max_tokens=2048,
-        )
-        raw = resp.choices[0].message.content.strip()
-        # Strip markdown fences if present
-        if "```" in raw:
-            match = re.search(r"```(?:python|javascript|js)?\n(.*?)\n```", raw, re.DOTALL)
-            if match:
-                raw = match.group(1)
-        return raw
+            # If Best-of-N, parse out approaches and use Epiplexity
+            if n_candidates > 1:
+                # regex to find [APPROACH X] blocks
+                approaches = re.split(r'\[APPROACH \d+\]\s*', raw)
+                approaches = [a.strip() for a in approaches if a.strip()]
+                
+                if approaches:
+                    print(f"    [GRPO] Generated {len(approaches)} approaches. Scoring with Epiplexity...")
+                    import sys
+                    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from core.inspector import compute_mdl_epiplexity
+                    
+                    best_approach = approaches[0]
+                    best_score = float('inf')
+                    
+                    for idx, app in enumerate(approaches):
+                        app = app.strip()
+                        # Strip accidental markdown fences from each approach
+                        if "```" in app:
+                            match = re.search(r"```(?:[a-zA-Z+]+)?\n(.*?)\n```", app, re.DOTALL)
+                            if match:
+                                app = match.group(1)
+                            else:
+                                app = re.sub(r"^```[a-zA-Z+]*\n", "", app)
+                                app = re.sub(r"\n```$", "", app)
+                        
+                        # Sanity Check (Vòng lọc số 1): Loại code lừa đảo (quá ngắn)
+                        if len(app) < 50:
+                            print(f"      - Approach {idx+1} Rejected: Too short (len={len(app)})")
+                            continue
+                            
+                        score = compute_mdl_epiplexity(app)
+                        print(f"      - Approach {idx+1} Epiplexity: {score:.4f}")
+                        
+                        # Vòng lọc số 2: Chọn min Epiplexity NHƯNG phải > ngưỡng 0.5 (Tránh Trivial Trap)
+                        if score > 0.5 and score < best_score:
+                            best_score = score
+                            best_approach = app
+                    
+                    # Nếu tất cả đều rớt ngưỡng (hoặc quá ngắn), lấy fallback là approach đầu tiên
+                    if best_score == float('inf'):
+                        print(f"    [GRPO] All approaches failed threshold/sanity. Falling back to Approach 1.")
+                        best_approach = approaches[0]
+                    else:
+                        print(f"    [GRPO] Selected approach with Epiplexity = {best_score:.4f}")
+                        
+                    return best_approach
+            
+            # Single approach mode: Strip markdown fences if present (all languages)
+            if "```" in raw:
+                match = re.search(
+                    r"```(?:python|javascript|js|go|golang|rust|java|cpp|c\+\+|c)?\n(.*?)\n```",
+                    raw, re.DOTALL
+                )
+                if match:
+                    raw = match.group(1)
+                else:
+                    # Fallback: strip any ``` fences regardless of language tag
+                    raw = re.sub(r"^```[a-zA-Z+]*\n", "", raw)
+                    raw = re.sub(r"\n```$", "", raw)
+            return raw
 
-    except Exception as e:
-        print(f"    [llm] Groq unavailable ({e}), using reference solution fallback.")
-        return _get_reference_solution(task_id, stub_content)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "429" in err_msg or "rate limit" in err_msg or "too many requests" in err_msg:
+                wait_time = 35 * (api_attempt + 1)
+                print(f"    [llm] Rate Limit hit! Waiting {wait_time}s before retry... ({e})")
+                time.sleep(wait_time)
+            else:
+                print(f"    [llm] Groq unavailable ({e}). Using empty stub.")
+                return stub_content + "\n# [DGM STUB] LLM Failure\n"
+    
+    print(f"    [llm] Exhausted all API retries. Returning empty stub.")
+    return stub_content + "\n# [DGM STUB] API Exhausted\n"
 
 
 # ---------------------------------------------------------------------------
@@ -639,20 +936,83 @@ def run_rust_test(task_dir: str) -> dict:
 
 
 def run_java_test(task_dir: str) -> dict:
-    print(f"    [gradle] Running java test in {task_dir}...")
-    gradlew = "./gradlew" if os.name != "nt" else "gradlew.bat"
-    if not os.path.exists(os.path.join(task_dir, "build.gradle")):
-         return {"exit_code": -1, "stdout": "", "stderr": "No build.gradle found"}
-    if os.name != "nt":
-        _run_subprocess(["chmod", "+x", "gradlew"], cwd=task_dir, timeout=5)
-    result = _run_subprocess([gradlew, "test"], cwd=task_dir, timeout=180)
-    return result
+    """
+    Run Java test using javac + direct JUnit execution (no Gradle needed).
+    Falls back to Gradle if build.gradle exists.
+    """
+    print(f"    [java] Running java test in {task_dir}...")
+    
+    # Try Gradle first if available
+    if os.path.exists(os.path.join(task_dir, "build.gradle")):
+        gradlew = "./gradlew" if os.name != "nt" else "gradlew.bat"
+        if os.name != "nt":
+            _run_subprocess(["chmod", "+x", "gradlew"], cwd=task_dir, timeout=5)
+        result = _run_subprocess([gradlew, "test"], cwd=task_dir, timeout=180)
+        return result
+    
+    # Fallback: compile with javac and run with java directly
+    java_files = []
+    for root, dirs, files in os.walk(task_dir):
+        for f in files:
+            if f.endswith(".java"):
+                java_files.append(os.path.join(root, f))
+    
+    if not java_files:
+        return {"exit_code": -1, "stdout": "", "stderr": "No .java files found"}
+    
+    # Compile all java files together
+    print(f"    [javac] Compiling {len(java_files)} Java files...")
+    compile_result = _run_subprocess(
+        ["javac", "-cp", "."] + java_files,
+        cwd=task_dir, timeout=30
+    )
+    if compile_result["exit_code"] != 0:
+        return {"exit_code": compile_result["exit_code"], "stdout": compile_result["stdout"],
+                "stderr": f"Compilation failed: {compile_result['stderr'][:500]}"}
+    
+    # Find test class name
+    test_classes = [os.path.splitext(os.path.basename(f))[0] for f in java_files if "Test" in f]
+    if not test_classes:
+        return {"exit_code": -1, "stdout": "", "stderr": "No test class found"}
+    
+    # Run the first test class
+    run_result = _run_subprocess(
+        ["java", "-cp", ".", test_classes[0]],
+        cwd=task_dir, timeout=30
+    )
+    return run_result
 
 
 def run_cpp_test(task_dir: str) -> dict:
+    """
+    Run C++ test. Auto-generates CMakeLists.txt if not present.
+    """
     print(f"    [cmake] Running cpp test in {task_dir}...")
-    if not os.path.exists(os.path.join(task_dir, "CMakeLists.txt")):
-        return {"exit_code": -1, "stdout": "", "stderr": "No CMakeLists.txt found"}
+    
+    # Auto-generate CMakeLists.txt if missing
+    cmake_path = os.path.join(task_dir, "CMakeLists.txt")
+    if not os.path.exists(cmake_path):
+        print(f"    [cmake] Auto-generating CMakeLists.txt...")
+        cpp_files = [f for f in os.listdir(task_dir) if f.endswith(".cpp")]
+        h_files = [f for f in os.listdir(task_dir) if f.endswith(".h")]
+        test_files = [f for f in cpp_files if "test" in f.lower()]
+        src_files = [f for f in cpp_files if "test" not in f.lower()]
+        
+        exercise_name = os.path.basename(task_dir).replace("cpp__", "").replace("-", "_")
+        
+        cmake_content = f"""cmake_minimum_required(VERSION 3.10)
+project({exercise_name})
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable({exercise_name}_test {' '.join(src_files + test_files)})
+target_include_directories({exercise_name}_test PRIVATE ${{CMAKE_CURRENT_SOURCE_DIR}})
+
+enable_testing()
+add_test(NAME {exercise_name}_test COMMAND {exercise_name}_test)
+"""
+        with open(cmake_path, "w") as f:
+            f.write(cmake_content)
+    
     build_dir = os.path.join(task_dir, "build")
     os.makedirs(build_dir, exist_ok=True)
     
@@ -751,18 +1111,88 @@ def run_outer_eval(
     # 5. Evaluate each task
     print("\n[Step 5] Running evaluations...\n")
     results = []
+    solver_mode = "reference-solutions" if use_reference else "groq-llm"
     
     rule_library = RuleLibrary()
-    from groq import Groq
-    groq_api_key = os.environ.get("GROQ_API_KEY", "")
-    llm_client = Groq(api_key=groq_api_key) if groq_api_key and groq_api_key != "YOUR_GROQ_API_KEY_HERE" else None
+    
+    import yaml
+    from dotenv import load_dotenv
+    from openai import OpenAI
+    
+    load_dotenv()
+    
+    # Load config.yaml
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+        
+    api_key_env_var = config.get("api_key_env_var", "QWEN_API_KEY")
+    api_key = os.environ.get(api_key_env_var, "")
+    base_url = config.get("base_url_conv_model", "https://proxy.onebot.meobeo.ai/v1")
+    
+    if not api_key:
+        print(f"WARNING: API key not found in env var '{api_key_env_var}'. Check your .env file.")
+        
+    llm_client = OpenAI(api_key=api_key, base_url=base_url)
+    
+    # Update default groq_model parameter to the new model from config if not specified
+    if not groq_model:
+        groq_model = config.get("conv_model", "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8")
+    
+    # ===== CONNECTION VERIFICATION =====
+    print(f"\n[Step 4.5] Verifying LLM connection...")
+    print(f"  API Base URL: {base_url}")
+    print(f"  Model: {groq_model}")
+    print(f"  API Key (masked): {api_key[:8]}...{api_key[-4:] if len(api_key) > 12 else '****'}")
+    try:
+        test_resp = llm_client.chat.completions.create(
+            model=groq_model,
+            messages=[{"role": "user", "content": "Reply with exactly: CONNECTION_OK"}],
+            max_tokens=20,
+            extra_body={
+                "cache": {"no-cache": True},
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+        )
+        test_reply = test_resp.choices[0].message.content.strip()
+        print(f"  ✅ LLM Connection VERIFIED! Response: '{test_reply}'")
+        print(f"  ✅ Model ID from response: {test_resp.model}")
+    except Exception as e:
+        print(f"  ❌ LLM Connection FAILED: {e}")
+        print(f"  ❌ Cannot proceed without LLM. Exiting.")
+        return None
+    # ===== END CONNECTION VERIFICATION =====
+
+    # Load completed tasks if resuming from checkpoint
+    completed_tasks = {}
+    if os.path.exists(output_path):
+        try:
+            with open(output_path, "r", encoding="utf-8") as f:
+                existing_report = json.load(f)
+            completed_tasks = {r["task_id"]: r for r in existing_report.get("task_results", [])}
+            print(f"  [Checkpoint] Loaded {len(completed_tasks)} completed task(s) from {output_path}")
+        except Exception as e:
+            print(f"  [Checkpoint] Warning: could not load existing report from {output_path}: {e}")
 
     for task_id in task_ids:
         print(f"{'─'*60}")
         print(f"  Task: {task_id}")
 
+        # Check if already completed
+        if task_id in completed_tasks:
+            print(f"  [Checkpoint] Reusing result from previous run (status: {completed_tasks[task_id].get('status')})")
+            results.append(completed_tasks[task_id])
+            continue
+
         if task_id not in TASK_REGISTRY:
-            print(f"  ⚠️  Not in TASK_REGISTRY — skipping")
+            print(f"  [Registry] Task {task_id} not in hardcoded registry. Attempting dynamic load...")
+            try:
+                get_task_meta_dynamically(task_id)
+            except Exception as e:
+                print(f"  ❌ Failed to dynamically load metadata for {task_id}: {e}")
+
+        if task_id not in TASK_REGISTRY:
+            print(f"  ⚠️  Not in TASK_REGISTRY and dynamic load failed — skipping")
             results.append({
                 "task_id": task_id,
                 "language": "unknown",
@@ -770,6 +1200,7 @@ def run_outer_eval(
                 "reason": "Task not in registry",
                 "pass": False,
             })
+            save_checkpoint(output_path, results, task_ids, available_langs, best_agent, solver_mode)
             continue
 
         meta = TASK_REGISTRY[task_id]
@@ -785,6 +1216,7 @@ def run_outer_eval(
                 "reason": f"{lang} compiler/runtime not installed on host",
                 "pass": False,
             })
+            save_checkpoint(output_path, results, task_ids, available_langs, best_agent, solver_mode)
             continue
 
         # Create task directory
@@ -821,9 +1253,18 @@ def run_outer_eval(
         if injected_rules:
             print(f"  [RIMRULE] Injecting top learned rules from Memory Bank...")
             
+        # Read test file content to inject into LLM prompt
+        test_file_content = None
+        if test_path and os.path.exists(test_path):
+            try:
+                with open(test_path, encoding="utf-8") as tf:
+                    test_file_content = tf.read()
+            except Exception:
+                pass
+        
         for attempt in range(max_retries):
             if attempt == 0:
-                print(f"  Generating solution ({mode}, Gen {best_agent.get('cycle', 0)})...")
+                print(f"  Generating solution ({mode}, Gen {best_agent.get('cycle', 0)}, GRPO Best-of-3)...")
                 if use_reference:
                     solution_code = _get_reference_solution(task_id, "")
                 else:
@@ -833,7 +1274,9 @@ def run_outer_eval(
                         stub_path,
                         model=groq_model,
                         injected_rules=injected_rules,
-                        client=llm_client
+                        client=llm_client,
+                        test_file_content=test_file_content,
+                        n_candidates=3
                     )
             else:
                 print(f"  [Reflexion] Attempt {attempt+1}/{max_retries} - Fixing previous errors...")
@@ -850,7 +1293,8 @@ def run_outer_eval(
                     previous_code=solution_code,
                     previous_error=error_log,
                     injected_rules=injected_rules,
-                    client=llm_client
+                    client=llm_client,
+                    test_file_content=test_file_content
                 )
 
             # Write solution to solution file
@@ -887,7 +1331,7 @@ def run_outer_eval(
                 if attempt > 0 and llm_client is not None:
                     # Successful Reflexion! Extract a rule to remember.
                     print("  [RIMRULE] Reflexion successful. Extracting generalizable rule...")
-                    new_rule = extract_rule_from_reflexion(failed_code, error_log, solution_code, client=llm_client)
+                    new_rule = extract_rule_from_reflexion(failed_code, error_log, solution_code, client=llm_client, model=groq_model)
                     if new_rule:
                         rule_library.add_or_update_rule(new_rule)
                         print(f"  [RIMRULE] Rule added to Memory Bank: {new_rule}")
@@ -915,7 +1359,9 @@ def run_outer_eval(
             "exit_code": test_result["exit_code"],
             "stdout_snippet": test_result.get("stdout", "")[:500],
             "stderr_snippet": test_result.get("stderr", "")[:500],
+            "generated_code": solution_code,
         })
+        save_checkpoint(output_path, results, task_ids, available_langs, best_agent, solver_mode)
 
     # 6. Compute real Pass@1
     print(f"\n{'='*70}")
@@ -990,8 +1436,8 @@ def main():
     parser = argparse.ArgumentParser(description="DGM Outer Loop Real Compiler Evaluator")
     parser.add_argument(
         "--tasks",
-        default=os.path.join(os.path.dirname(__file__), "polyglot", "subsets", "small.json"),
-        help="Path to task list JSON (default: polyglot/subsets/small.json)",
+        default=os.path.join(os.path.dirname(__file__), "polyglot", "subsets", "polyglot_60.json"),
+        help="Path to task list JSON (default: polyglot/subsets/polyglot_60.json)",
     )
     parser.add_argument(
         "--archive",
