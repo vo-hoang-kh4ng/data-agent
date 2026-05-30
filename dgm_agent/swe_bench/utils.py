@@ -3,7 +3,7 @@ import io
 import logging
 import threading
 from typing import Union, Optional
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import docker
 
 # Thread-local storage for loggers
@@ -115,7 +115,8 @@ def copy_to_container(container, source_path: Union[str, Path], dest_path: Union
         Exception: For other errors during copy operation
     """
     source_path = Path(source_path)
-    dest_path = Path(dest_path)
+    # Always use POSIX (forward-slash) paths for Docker container destinations
+    dest_posix = PurePosixPath(str(dest_path).replace('\\', '/'))
     
     try:
         if not source_path.exists():
@@ -123,20 +124,20 @@ def copy_to_container(container, source_path: Union[str, Path], dest_path: Union
             
         # Determine container destination directory
         if source_path.is_file():
-            container_dest_dir = str(dest_path.parent)
-            archive_path = dest_path.name
+            container_dest_dir = str(dest_posix.parent)
+            archive_path = dest_posix.name
             with open(source_path, 'rb') as source_file:
                 data = source_file.read()
             archive = create_archive(archive_path, data)
         else:
             # For directories, we want to copy to the parent of dest_path
-            container_dest_dir = str(dest_path.parent)
+            container_dest_dir = str(dest_posix.parent)
             archive = create_archive(source_path)
             
         # Create destination directory in container if it doesn't exist
         container.exec_run(f"mkdir -p {container_dest_dir}")
 
-        safe_log(f"Copying {source_path} to container at {dest_path}")
+        safe_log(f"Copying {source_path} to container at {dest_posix}")
         success = container.put_archive(container_dest_dir, archive)
         
         if not success:
@@ -161,26 +162,27 @@ def copy_from_container(container, source_path: Union[str, Path], dest_path: Uni
         FileNotFoundError: If source path doesn't exist in container
         Exception: For other errors during copy operation
     """
-    source_path = Path(source_path)
+    # Always use POSIX paths for Docker container source paths
+    source_posix = PurePosixPath(str(source_path).replace('\\', '/'))
     dest_path = Path(dest_path)
     
     try:
         # Check if source exists in container
-        result = container.exec_run(f"test -e {source_path}")
+        result = container.exec_run(f"test -e {source_posix}")
         if result.exit_code and result.exit_code != 0:
-            raise FileNotFoundError(f"Source path not found in container: {source_path}")
+            raise FileNotFoundError(f"Source path not found in container: {source_posix}")
             
         # Get file type from container
-        result = container.exec_run(f"stat -f '%HT' {source_path}")
+        result = container.exec_run(f"stat -f '%HT' {source_posix}")
         is_file = result.output.decode().strip() == 'Regular File'
             
         # Create destination directory if it doesn't exist
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         
-        safe_log(f"Copying from container {source_path} to local path {dest_path}")
+        safe_log(f"Copying from container {source_posix} to local path {dest_path}")
         
         # Get archive from container
-        bits, stat = container.get_archive(str(source_path))
+        bits, stat = container.get_archive(str(source_posix))
         
         # Concatenate all chunks into a single bytes object
         archive_data = b''.join(bits)

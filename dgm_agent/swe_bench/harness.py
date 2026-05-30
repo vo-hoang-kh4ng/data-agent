@@ -1,14 +1,18 @@
 import argparse
 import datetime
 import json
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import docker
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datasets import load_dataset
 
 from prompts.testrepo_prompt import get_test_description
-from swebench.harness.test_spec import make_test_spec
+from swebench.harness.test_spec.test_spec import make_test_spec
 from swebench.harness.docker_build import build_env_images, build_container, cleanup_container
 
 from swe_bench.utils import (
@@ -43,9 +47,18 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         client = docker.from_env()
         run_id = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
         # Set up thread-specific logger
-        logger = setup_logger(str(out_dname / f"{instance_id}_docker.log"))
+        log_file = out_dname / f"{instance_id}_docker.log"
+        logger = setup_logger(str(log_file))
+        
+        # Create console handler to stream to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
         nocache = True
-        test_spec = make_test_spec(entry)
+        test_spec = make_test_spec(entry, instance_image_tag="latest", env_image_tag="latest")
         # Remove any existing container with the same name
         container_name = test_spec.get_instance_container_name(run_id)
         remove_existing_container(client, container_name)
@@ -53,22 +66,10 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         container = build_container(test_spec, client, run_id, logger, nocache, force_rebuild=False)
         container.start()
 
-        # Check that we are in dgm directory
-        tmp_currdir = os.path.abspath(os.getcwd())
-        logger.info(f"Current directory: {tmp_currdir}")
-        # If not in dgm directory, try to change to it
-        if not tmp_currdir.endswith('/dgm'):
-            try:
-                os.chdir('dgm')
-                tmp_currdir = os.path.abspath(os.getcwd())
-                logger.info(f"Changed directory to: {tmp_currdir}")
-            except Exception as e:
-                pass
-        # If still not in dgm directory, go up until we find it
-        while not tmp_currdir.endswith('/dgm'):
-            os.chdir('..')
-            tmp_currdir = os.path.abspath(os.getcwd())
-            logger.info(f"Changed directory to: {tmp_currdir}")
+        # Navigate to dgm_agent directory (parent of swe_bench/)
+        dgm_agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(dgm_agent_dir)
+        logger.info(f"Working directory set to: {dgm_agent_dir}")
 
         # Copy the necessary files and requirements to the container
         copy_to_container(container, 'coding_agent.py', '/dgm/coding_agent.py')
@@ -85,8 +86,11 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         # Install issue requirements
         logger.info("Setting up environment")
         eval_script = test_spec.eval_script
-        eval_file.write_text(eval_script)
+        # Write with Unix LF line endings (binary mode) to avoid Windows CRLF breaking bash scripts in Linux container
+        eval_file.write_bytes(eval_script.replace('\r\n', '\n').encode('utf-8'))
         copy_to_container(container, eval_file, '/eval.sh')
+        # Make sure eval.sh is executable with Unix line endings inside container
+        container.exec_run("sed -i 's/\r//' /eval.sh", workdir='/')
         exec_result = container.exec_run("/bin/bash /eval.sh", workdir='/')  # setup environment
         log_container_output(exec_result)
         exec_result = container.exec_run("rm /eval.sh", workdir='/')  # remove eval script
@@ -118,10 +122,11 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
             "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
             "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
+            "GROQ_API_KEY": os.getenv('GROQ_API_KEY'),
         }
         safe_log("Running the agent")
         cmd = [
-            "timeout", "32400",  # 9h timeout
+            "timeout", "3600",  # 1h timeout
             "python", "/dgm/coding_agent.py",
             "--problem_statement", problem_statement,
             "--git_dir", "/testbed/",
@@ -130,6 +135,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             "--outdir", "/dgm/",
             "--test_description", test_description,
             "--instance_id", instance_id,
+            "--model", model_name_or_path,
         ]
         exec_result = container.exec_run(cmd, environment=env_vars, workdir='/')
         log_container_output(exec_result)
@@ -208,10 +214,9 @@ def harness(
     
     # Ensure that necessary directories exist
     if model_name_or_path is None:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_name_or_path = f"{timestamp}--claude-3-5-sonnet-20241022"
-    pred_dname = Path(pred_dname)
-    pred_dname.mkdir(exist_ok=True)
+        model_name_or_path = "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
+    pred_dname = Path(pred_dname).resolve()
+    pred_dname.mkdir(parents=True, exist_ok=True)
     out_dnames = []
     
     # Prepare the dataset entries
@@ -223,13 +228,13 @@ def harness(
 
     # Build the environment images
     client = docker.from_env()
-    build_env_images(client, dataset=entries, force_rebuild=False, max_workers=max_workers)
+    build_env_images(client, dataset=entries, force_rebuild=False, max_workers=max_workers, instance_image_tag="latest", env_image_tag="latest")
     
     # Define a function to handle a single evaluation for all specified issues
     def process_evaluation(eval_idx):
         model_name_or_path_inst = f"{model_name_or_path}_{eval_idx}"
         out_dname = pred_dname / model_name_or_path_inst
-        out_dname.mkdir(exist_ok=True)
+        out_dname.mkdir(parents=True, exist_ok=True)
         
         print(f"Starting evaluation {eval_idx} for model {model_name_or_path}")
         
@@ -237,7 +242,7 @@ def harness(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_entry = {
-                executor.submit(process_entry, entry, out_dname, model_name_or_path_inst, model_patch_paths): entry
+                executor.submit(process_entry, entry, out_dname, model_name_or_path, model_patch_paths): entry
                 for entry in entries
             }
             
@@ -266,21 +271,26 @@ def main():
     parser.add_argument("--model_patch_paths", type=str, default=None, help="Paths to the model patches")
     parser.add_argument("--num_evals", type=int, default=1, help="Repeated number of swe evaluations")
     parser.add_argument("--num_evals_parallel", type=int, default=1, help="Number of parallel repeated evaluations")
-    parser.add_argument("--pred_dname", type=str, default="./swe_bench/predictions", help="Output directory for predictions")
+    parser.add_argument("--pred_dname", type=str, default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "predictions"), help="Output directory for predictions")
     parser.add_argument("--test_task_list", type=str, default=None, help="Subset of swe issues to process")
     args = parser.parse_args()
     
     # Load the test task list
+    subsets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subsets")
     if args.test_task_list == 'small':
-        test_task_list = load_json_file("./swe_bench/subsets/small.json")
+        test_task_list = load_json_file(os.path.join(subsets_dir, "small.json"))
     elif args.test_task_list == 'medium':
-        test_task_list = load_json_file("./swe_bench/subsets/medium.json")
+        test_task_list = load_json_file(os.path.join(subsets_dir, "medium.json"))
+    elif args.test_task_list == 'nano':
+        test_task_list = load_json_file(os.path.join(subsets_dir, "nano.json"))
+    elif args.test_task_list == 'custom_100':
+        test_task_list = load_json_file(os.path.join(subsets_dir, "custom_100.json"))
     else:
         # Default to None, means all of them
         test_task_list = None
 
     # Run the parallel harness
-    harness(
+    out_dnames = harness(
         test_task_list=test_task_list,
         num_samples=args.num_samples,
         max_workers=args.max_workers,
@@ -290,6 +300,28 @@ def main():
         num_evals_parallel=args.num_evals_parallel,
         pred_dname=args.pred_dname,
     )
+
+    # Generate evaluation report
+    try:
+        from swe_bench.report import make_report
+        # Convert Path objects to relative string paths
+        cwd = Path(os.getcwd())
+        dnames_str = []
+        for dname in out_dnames:
+            dpath = Path(dname)
+            if dpath.is_absolute():
+                dnames_str.append(str(dpath.relative_to(cwd)))
+            else:
+                dnames_str.append(str(dname))
+        
+        print("Consolidating predictions and generating reports...")
+        make_report(
+            dnames=dnames_str,
+            dataset_name="princeton-nlp/SWE-bench_Verified",
+            output_dir=args.pred_dname,
+        )
+    except Exception as e:
+        print(f"Error generating report: {e}")
 
 if __name__ == "__main__":
     main()

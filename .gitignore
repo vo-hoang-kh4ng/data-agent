@@ -47,3 +47,7 @@ config.yaml
 *.swo
 .DS_Store
 Thumbs.db
+
+# Ignore large LCB evaluation files
+dgm_agent/lcb_tasks/
+dgm_agent/lcb_predictions*/sandbox/

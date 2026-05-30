@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 def load_predictions(paths):
@@ -13,7 +14,7 @@ def load_predictions(paths):
         if path.is_file():
             prediction_paths.append(path)
         elif path.is_dir():
-            prediction_paths += list(path.glob("*.json"))
+            prediction_paths += list(path.rglob("*.json"))
         else:
             assert False, path
 
@@ -82,15 +83,17 @@ def preds_to_jsonl(dname, predictions):
 
 def run_evals(predictions_jsonl, run_id, dataset_name, root_dir, output_dir, num_eval_procs=5):
     os.chdir(output_dir)  # switch dir so that things will be saved in the specified output_dir
-    run_evals_cmd = f"""
-python {os.path.join(root_dir, './swe_bench/SWE-bench/swebench/harness/run_evaluation.py')}
-    --dataset_name {dataset_name}
-    --predictions_path {predictions_jsonl}
-    --max_workers {num_eval_procs}
-    --run_id {run_id}
-"""
-    run_evals_cmd = " ".join([line.strip() for line in run_evals_cmd.split() if line.strip()])
-    subprocess.run(run_evals_cmd.split(), check=True)
+    run_evals_cmd = [
+        sys.executable, "-m", "swebench.harness.run_evaluation",
+        "--dataset_name", dataset_name,
+        "--predictions_path", predictions_jsonl,
+        "--max_workers", str(num_eval_procs),
+        "--run_id", run_id,
+        "--report_dir", output_dir
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = root_dir + os.pathsep + env.get("PYTHONPATH", "")
+    subprocess.run(run_evals_cmd, env=env, check=True)
     os.chdir(root_dir)  # switch back to the original directory
 
 def make_report(

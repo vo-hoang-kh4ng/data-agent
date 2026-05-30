@@ -122,10 +122,11 @@ To handle the heavy computational requirements of compiling and executing 6 diff
 ## 📊 Benchmark Results
 
 ### 1. LiveCodeBench (100 Validation Tasks)
-Recently evaluated using the full **LAMBDA DGM-Agent framework** integrated with `lcb_harness.py`.
-- **Model**: `Qwen3.5-35B-A3B-FP8` (zero-shot, 10 samples per task)
-- **Result**: **40.0% Pass@10** (39.6% Pass@1).
-- **Key finding**: By leveraging a **streaming API** mechanism and relaxing the context budget to `max_tokens=16384`, we enabled the open-weights model to fully express its internal reasoning chains. This completely eliminated `504 Gateway Time-out` errors on our Nginx proxy and proved that maximizing reasoning tokens directly translates to exceptional competitive programming performance.
+Evaluated using the full **LAMBDA DGM-Agent framework** integrated with `lcb_harness.py`.
+- **Model**: `Qwen3.5-35B-A3B-FP8` (10 samples per task)
+- **Baseline (Zero-shot)**: 40.0% Pass@10 (39.6% Pass@1).
+- **With Self-Debug Loop**: **40.0% Pass@10** (39.8% Pass@1).
+- **Key finding**: While the Self-Debug loop (incorporating automated testing on extracted examples) successfully stabilized generation and slightly improved Pass@1 (39.6% -> 39.8%), it did not significantly boost Pass@10. Our log analysis reveals that the primary bottleneck is **context exhaustion** on ultra-complex LeetCode/Codeforces problems (yielding `Empty Response`), where the open-weights reasoning model reaches its 16K token limits before outputting code. This implies that pushing beyond 50% Pass@10 requires transitioning to a Multi-Agent architecture (e.g., separating the Planner and Coder agents) rather than relying solely on single-agent Self-Debug.
 
 ![LiveCodeBench Results](lcb_results.png)
 

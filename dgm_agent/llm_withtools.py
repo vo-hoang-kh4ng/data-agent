@@ -15,7 +15,9 @@ OPENAI_MODEL = 'o3-mini-2025-01-31'
 
 def process_tool_call(tools_dict, tool_name, tool_input):
     try:
-        if tool_name in tools_dict:
+        if tool_name == 'invalid_format':
+            return tool_input.get('error', 'Invalid tool call format')
+        elif tool_name in tools_dict:
             return tools_dict[tool_name]['function'](**tool_input)
         else:
             return f"Error: Tool '{tool_name}' not found"
@@ -98,11 +100,22 @@ def check_for_tool_use(response, model=''):
         if match:
             tool_use_str = match.group(1).strip()
             try:
-                tool_use_dict = ast.literal_eval(tool_use_str)
+                try:
+                    tool_use_dict = json.loads(tool_use_str)
+                except Exception:
+                    tool_use_dict = ast.literal_eval(tool_use_str)
                 if isinstance(tool_use_dict, dict) and 'tool_name' in tool_use_dict and 'tool_input' in tool_use_dict:
                     return tool_use_dict
-            except Exception:
-                pass
+                else:
+                    return {
+                        'tool_name': 'invalid_format',
+                        'tool_input': {'error': 'Tool call must be a dictionary with tool_name and tool_input keys'}
+                    }
+            except Exception as e:
+                return {
+                    'tool_name': 'invalid_format',
+                    'tool_input': {'error': f'Failed to parse tool call. Ensure it is valid JSON. Error: {str(e)}'}
+                }
 
     # No tool use found
     return None
@@ -330,8 +343,11 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
             # Check for next tool use
             tool_use = check_for_tool_use(response, model=client_model)
 
-    except Exception:
-        pass
+    except Exception as e:
+        import traceback
+        err_msg = f"Error in chat_with_agent_manualtools: {str(e)}\n{traceback.format_exc()}"
+        logging(err_msg)
+        print(err_msg)  # Also print so it shows in container logs
 
     return new_msg_history
 
