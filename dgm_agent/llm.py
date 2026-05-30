@@ -81,6 +81,23 @@ def create_client(model: str):
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
         ), model
+    elif model.startswith("hosted_vllm/"):
+        # Qwen proxy (proxy.onebot.meobeo.ai) or any hosted vLLM endpoint
+        # Read base_url from config.yaml if available, fall back to proxy.onebot.meobeo.ai
+        base_url = "https://proxy.onebot.meobeo.ai/v1"
+        try:
+            import yaml
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            base_url = config.get("base_url_conv_model", base_url)
+            api_key_env = config.get("api_key_env_var", "QWEN_API_KEY")
+        except Exception:
+            api_key_env = "QWEN_API_KEY"
+        api_key = os.environ.get(api_key_env) or os.environ.get("OPENAI_API_KEY", "")
+        print(f"Using hosted_vllm proxy ({base_url}) with model {model}.")
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        return client, model  # pass full model name as-is to proxy
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -292,7 +309,24 @@ def get_response_from_llm(
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
         resoning_content = response.choices[0].message.reasoning_content
     else:
-        raise ValueError(f"Model {model} not supported.")
+        # Fallback: OpenAI-compatible API (Groq hosted_vllm and others)
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=16384,
+            n=1,
+            stream=True
+        )
+        content = ""
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content += chunk.choices[0].delta.content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     if print_debug:
         print()
         print("*" * 20 + " LLM START " + "*" * 20)
