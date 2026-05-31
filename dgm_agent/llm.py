@@ -318,7 +318,7 @@ def get_response_from_llm(
                 *new_msg_history,
             ],
             temperature=temperature,
-            max_tokens=16384,
+            max_tokens=MAX_OUTPUT_TOKENS,
             n=1,
             stream=True
         )
