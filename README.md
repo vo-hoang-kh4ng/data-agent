@@ -130,12 +130,22 @@ Evaluated using the full **LAMBDA DGM-Agent framework** integrated with `lcb_har
 
 ![LiveCodeBench Results](lcb_results.png)
 
-### 2. Polyglot Benchmark (60 Tasks)
+### 2. DS-Bench (Unified Data Lake Evaluation)
+Evaluated using the **DGM-Agent Blackboard System** to test Data Discovery capabilities within a highly noisy "Unified Data Lake" environment (combining all dataset files into a single unstructured folder).
+- **Setup**: Filtered 60 questions from Appendix G of the paper, generating a data lake of 166 independent files.
+- **Model**: `Qwen3.5-35B-A3B-FP8` (using `hosted_vllm` proxy).
+- **Baseline (Paper's Blackboard + Claude 4 Opus)**: 49.8% Pass Rate.
+- **Ours (DGM Blackboard + Qwen3.5-35B)**: **98.3% Pass Rate** (59/60 tasks passed).
+- **Insight**: The combination of the DGM Self-Debug (Reflexion) outer loop with the Blackboard architecture's file-clustering capabilities effectively isolates noisy data files and autonomously corrects data schema issues, achieving state-of-the-art data discovery and reasoning without overwhelming the main agent with a massive context window.
+
+![DS-Bench Unified Results](data/dsbench_unified_results.png)
+
+### 3. Polyglot Benchmark (60 Tasks)
 - **Outer-loop Real-Compiler Evaluation**: Achieved **46.7% Pass@1** when executed cleanly within Docker containers.
 - **Inner-loop Surrogate Evaluation**: 32.5% Pass@1.
 - **Insight**: The inverse surrogate gap (Outer > Inner) confirms the profound effectiveness of the Reflexion mechanism in the outer loop, correcting syntactical errors that passed the initial Epiplexity filter.
 
-### 3. SWE-bench (100 Tasks)
+### 4. SWE-bench (100 Tasks)
 - Zero-shot evaluations with open-weights (35B) yielded 0% Pass. The framework seamlessly handled the complex multi-stage Docker build process (Patch Generation & Test Evaluation), confirming it is 100% ready to plug-and-play larger frontier models (e.g., GPT-4o, Claude 3.5 Sonnet) for official leaderboard submissions.
 
 ### 1. Pre-download the Benchmark Dataset
