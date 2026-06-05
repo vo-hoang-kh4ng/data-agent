@@ -36,6 +36,7 @@
 conv_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
 programmer_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
 inspector_model : "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8"
+api_key : "sk-JW3pxOsFpFih5f1v7YHfZA"
 api_key_env_var : "QWEN_API_KEY"
 base_url_conv_model : 'https://proxy.onebot.meobeo.ai/v1'
 base_url_programmer : 'https://proxy.onebot.meobeo.ai/v1'

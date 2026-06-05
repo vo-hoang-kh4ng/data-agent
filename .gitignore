@@ -23,18 +23,15 @@ __pycache__/
 .gradio/
 
 # ==========================================
-#      LAMBDA Core App Data & Cache (IMPORTANT)
+#      LAMBDA Core App Data & Cache
 # ==========================================
-# Ignore the local session caching directories which contain
-# private user-uploaded Excel datasets, plots, and chats.
 cache/
 dgm_agent/sandbox_lambda*/
 tests/temp_cache/
 
 # ==========================================
-#     Local Config & Credentials Fallbacks
+#     Local Config & Credentials
 # ==========================================
-# Prevent developer secrets from leaking into Git.
 .env
 config.yaml
 
@@ -47,24 +44,34 @@ config.yaml
 *.swo
 .DS_Store
 Thumbs.db
+.claude/
 
-# Ignore large LCB evaluation files
-dgm_agent/lcb_tasks/
-dgm_agent/lcb_predictions*/sandbox/
-# DA-Code and DS-Bench datasets
+# ==========================================
+#       Benchmark Data & Outputs
+# ==========================================
+# DA-Code datasets, gold, sandbox outputs
 data/
 task_cfg/
 eval_cfg/
 *.zip
 
-# Sandbox outputs
+# SWE-bench / LCB logs
+logs/
+dgm_agent/initial/logs/
+dgm_agent/lcb_tasks/
+dgm_agent/lcb_predictions*/sandbox/
 dgm_agent/lcb_sandbox/
 
-# Stray output files
+# ==========================================
+#       Build & Stray Output Files
+# ==========================================
 *.csv
 *.db
-*.txt
-
-
 *.pdf
+*.bak
+*.log
+*.spec
 
+# Third-party / unrelated projects
+Understand-Anything/
+.understand-anything/

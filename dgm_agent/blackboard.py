@@ -130,9 +130,9 @@ class Blackboard:
             lines.append("")
             
         full_context = "\n".join(lines)
-        # Giới hạn context chặt chẽ hơn (60000 chars) vì dữ liệu bảng chứa nhiều số/token
-        if len(full_context) > 60000:
-            full_context = full_context[:60000] + "\n...[CONTEXT TRUNCATED DUE TO LENGTH LIMIT]..."
+        # Context limit — keep under 80K chars to leave room for question + code
+        if len(full_context) > 80000:
+            full_context = full_context[:80000] + "\n...[CONTEXT TRUNCATED DUE TO LENGTH LIMIT]..."
             
         return full_context
 
@@ -152,63 +152,17 @@ class FileAgent:
 
     # ── Đọc file ── #
 
-    def _compute_ncd(self, x: bytes, y: bytes) -> float:
-        if not x and not y:
-            return 0.0
-        if not x or not y:
-            return 1.0
-        cx = len(zlib.compress(x))
-        cy = len(zlib.compress(y))
-        cxy = len(zlib.compress(x + b' ' + y))
-        return (cxy - min(cx, cy)) / max(cx, cy)
-
     def _prune_dataframe(self, df: pd.DataFrame, goal_hint: str) -> str:
-        if df.empty or not goal_hint:
-            return df.head(20).to_string(index=False, max_rows=20, max_cols=15)
-        
-        goal_bytes = goal_hint.encode('utf-8')
-        scored_rows = []
-        
-        # Limit to 1000 rows
-        df_limited = df.head(1000)
-        columns = df_limited.columns.tolist()
-        
-        for idx, row in df_limited.iterrows():
-            # Header-Row Injection
-            row_parts = []
-            for col, val in zip(columns, row.values):
-                row_parts.append(f"{col}: {val}")
-            row_str = ", ".join(row_parts)
-            
-            row_bytes = row_str.encode('utf-8')
-            score = self._compute_ncd(goal_bytes, row_bytes)
-            scored_rows.append((score, row_str))
-            
-        scored_rows.sort(key=lambda x: x[0])
-        top_rows = [x[1] for x in scored_rows[:20]]
-        return "\n".join(top_rows)
+        """Return header + first 20 rows as text. No NCD pruning — keep raw samples."""
+        if df.empty:
+            return "(empty dataframe)"
+        return df.head(20).to_string(index=False, max_rows=20, max_cols=15)
 
     def _prune_text(self, lines: List[str], goal_hint: str) -> str:
-        if not lines or not goal_hint:
-            return "".join(lines[:20])[:2000]
-            
-        goal_bytes = goal_hint.encode('utf-8')
-        scored_lines = []
-        
-        # Limit to 1000 lines
-        limited_lines = lines[:1000]
-        
-        for line in limited_lines:
-            line_str = line.strip()
-            if not line_str:
-                continue
-            line_bytes = line_str.encode('utf-8')
-            score = self._compute_ncd(goal_bytes, line_bytes)
-            scored_lines.append((score, line_str))
-            
-        scored_lines.sort(key=lambda x: x[0])
-        top_lines = [x[1] for x in scored_lines[:20]]
-        return "\n".join(top_lines)[:2000]
+        """Return first 20 lines. No NCD pruning — keep raw samples."""
+        if not lines:
+            return ""
+        return "".join(lines[:20])[:2000]
 
     def _read_csv(self, fpath: str, goal_hint: str) -> FileContext:
         try:
@@ -335,17 +289,10 @@ class FileAgent:
 
 # ─────────────────────────── Cluster Factory ──────────────────────────────── #
 
-def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 5) -> List[FileAgent]:
+def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 8, use_semantic: bool = True) -> List[FileAgent]:
     """
-    Tự động nhóm các file trong data_lake_dir thành các cụm (cluster)
-    dựa trên prefix chung hoặc thư mục con, rồi tạo FileAgent cho mỗi cụm.
-    
-    Args:
-        data_lake_dir: Thư mục chứa tất cả file dữ liệu của bài toán.
-        max_files_per_cluster: Số file tối đa trong 1 cụm.
-    
-    Returns:
-        Danh sách các FileAgent.
+    Tự động nhóm các file trong data_lake_dir thành các cụm (cluster).
+    Ưu tiên E5-Large semantic clustering, fallback sang prefix clustering.
     """
     data_root = Path(data_lake_dir)
     if not data_root.exists():
@@ -359,38 +306,101 @@ def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 5) -> Lis
         print(f"  ⚠️ Không tìm thấy file dữ liệu trong: {data_lake_dir}")
         return []
 
-    # Gom cụm theo thư mục con
+    # ── Method 1: E5-Large + KMeans semantic clustering ── #
+    if use_semantic:
+        try:
+            import numpy as _np
+            from sklearn.cluster import KMeans as _KMeans
+            from openai import OpenAI as _OAI
+
+            N_CLUSTERS = min(26, len(all_files) // 2)  # Paper: 26 clusters
+
+            # Build file descriptions: filename + first 200 chars
+            descriptions = []
+            for fpath in all_files:
+                fname = Path(fpath).stem
+                preview = ""
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                        preview = f.read(200)
+                except:
+                    pass
+                descriptions.append(f"File: {fname}. {preview[:150]}")
+
+            # Embed via API
+            embed_key = os.environ.get("EMBED_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+            embed_base = os.environ.get("EMBED_BASE_URL", "https://proxy.onebot.meobeo.ai/v1")
+            embed_model = os.environ.get("EMBED_MODEL", "hosted_vllm/intfloat/multilingual-e5-large")
+
+            if embed_key and len(all_files) >= N_CLUSTERS:
+                embed_client = _OAI(api_key=embed_key, base_url=embed_base)
+
+                # Batch embed
+                all_embeddings = []
+                batch_size = 32
+                for i in range(0, len(descriptions), batch_size):
+                    batch = descriptions[i:i+batch_size]
+                    resp = embed_client.embeddings.create(model=embed_model, input=batch)
+                    for item in resp.data:
+                        all_embeddings.append(item.embedding)
+
+                embeddings = _np.array(all_embeddings)
+                print(f"  📊 E5 embeddings: {embeddings.shape}")
+
+                kmeans = _KMeans(n_clusters=N_CLUSTERS, random_state=42, n_init=10)
+                labels = kmeans.fit_predict(embeddings)
+
+                # Group by cluster
+                cluster_groups: Dict[int, List[str]] = defaultdict(list)
+                for fpath, label in zip(all_files, labels):
+                    cluster_groups[label].append(fpath)
+
+                # Auto-name clusters from top file stems
+                final_clusters: Dict[str, List[str]] = {}
+                for label, files in cluster_groups.items():
+                    top = [Path(f).stem[:15] for f in files[:3]]
+                    name = '_'.join(top[:2]) if top else f"cluster_{label:02d}"
+                    final_clusters[name] = files
+
+                agents = []
+                for idx, (cluster_name, files) in enumerate(final_clusters.items()):
+                    agents.append(FileAgent(
+                        agent_id=f"file_agent_{idx:02d}",
+                        cluster_name=cluster_name,
+                        file_paths=files,
+                    ))
+                print(f"  ✅ E5-Large + KMeans: {len(agents)} clusters for {len(all_files)} files")
+                return agents
+        except Exception as e:
+            print(f"  ⚠️ E5 clustering failed: {str(e)[:120]}, falling back to prefix...")
+
+    # ── Fallback: prefix clustering ── #
     clusters: Dict[str, List[str]] = defaultdict(list)
     for fpath in all_files:
         rel = Path(fpath).relative_to(data_root)
         cluster_key = str(rel.parent) if str(rel.parent) != "." else "_root_"
         clusters[cluster_key].append(fpath)
 
-    # Nếu 1 cụm quá nhiều file, chia nhỏ tiếp theo tiền tố
     final_clusters: Dict[str, List[str]] = {}
     for cluster_name, files in clusters.items():
         if len(files) <= max_files_per_cluster:
             final_clusters[cluster_name] = files
         else:
-            # Chia theo tiền tố 3 ký tự đầu tên file
             sub: Dict[str, List[str]] = defaultdict(list)
             for f in files:
                 prefix = Path(f).stem[:3].lower()
                 sub[prefix].append(f)
             for sub_key, sub_files in sub.items():
-                name = f"{cluster_name}_{sub_key}"
-                final_clusters[name] = sub_files
+                final_clusters[f"{cluster_name}_{sub_key}"] = sub_files
 
     agents = []
     for idx, (cluster_name, files) in enumerate(final_clusters.items()):
-        agent = FileAgent(
+        agents.append(FileAgent(
             agent_id=f"file_agent_{idx:02d}",
             cluster_name=cluster_name,
             file_paths=files,
-        )
-        agents.append(agent)
-
-    print(f"  📂 Đã tạo {len(agents)} FileAgent cho {len(all_files)} files trong Data Lake.")
+        ))
+    print(f"  📂 Prefix clustering: {len(agents)} clusters for {len(all_files)} files")
     return agents
 
 
