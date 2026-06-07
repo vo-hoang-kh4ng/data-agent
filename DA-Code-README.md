@@ -132,6 +132,9 @@ DA-Code Task (question, data_lake_dir, hardness)
 # Cài dependencies
 pip install -r requirements.txt
 
+# Clone DA-Code official repo (cần cho evaluator)
+git clone https://github.com/Leo-CHL/DA-Code.git da-code-repo
+
 # Download source data từ DA-Code official
 # https://drive.google.com/file/d/1eM_FVT1tlY4XXp6b7TrKzgTWOvskrjTs/view
 # Extract vào data/dacode_source/source/
@@ -139,6 +142,8 @@ pip install -r requirements.txt
 # Setup unified data lake (aggregates 179 files from 91 tasks)
 python scripts/setup_dacode_unified.py
 ```
+
+> **Lưu ý:** `eval_official.py` import evaluator từ `da-code-repo/da_agent/evaluators/evaluation.py` — repo này phải nằm cùng cấp với project.
 
 ### Chạy benchmark
 
