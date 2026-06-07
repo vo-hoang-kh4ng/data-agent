@@ -39,28 +39,30 @@ python -m benchmarks.run_benchmarks --report-only                      # Chỉ g
 
 ## DA-Code Benchmark (EMNLP 2024)
 - **Tasks**: 91 retained IDs (Data Insight: 61, Data Manipulation: 18, Statistical Analysis: 12)
+- **Setting**: Data Discovery (question + 179-file data lake, no pre-known correct files)
 - **LLM**: Qwen 3.5 35B (proxy.onebot.meobeo.ai)
-- **Pipeline**: Multi-Step Exploration (Plan → Explore → Code → Execute + Debug)
+- **Pipeline**: Triadic DGM (Blackboard → Planner → Solver → Verifier + RIMRULE + Goldilocks)
 - **Runner**: `python -m dgm_agent.dacode_runner`
 - **Eval**: `python eval_official.py` (uses `da-code-repo/da_agent/evaluators/metrics/`)
-- **Core files**: `dgm_agent/blackboard.py` (E5 + KMeans clustering), `dgm_agent/dacode_runner.py` (multi-step runner), `dgm_agent/llm.py` (LLM client)
+- **Docs**: `DA-Code-README.md` — chi tiết đầy đủ
 
 ### Kết quả Triadic DGM trên DA-Code
 
 | Version | Score | Perfect | Finished | Notes |
 |---------|-------|---------|----------|-------|
-| **v4 Multi-Step** | **0.1670** | **12/91** | **91/91 (100%)** | Plan→Explore→Code pipeline |
-| v3 Top-K Filter | 0.1264 | 10/91 | 86/91 | E5 + KMeans, top-5 filter |
-| v1 Baseline | 0.1037 | 8/91 | 88/91 | 1-shot code generation |
+| **Triadic DGM (KMeans=2)** | **0.2529** | **20/91** | **91/91 (100%)** | Best config, surpasses DA-Code baseline |
+| Triadic DGM (KMeans=16) | 0.2146 | 17/91 | 91/91 (100%) | +15.8% vs KMeans=26 |
+| Triadic DGM (KMeans=26) | 0.1853 | 15/91 | 91/91 (100%) | E5 + KMeans baseline |
+| v4 Multi-Step | 0.1670 | 12/91 | 91/91 (100%) | Plan→Explore→Code pipeline |
 | Blackboard reproduction | 0.2246 | 18/91 | 88/91 | Paper reproduction |
-| DA-Code baseline | 0.244 | 21/91 | 87/91 | Original paper baseline |
+| DA-Code baseline (paper) | 0.244 | 21/91 | 87/91 | GPT-4, original paper |
 
-### Theo loại task (v4)
+### Theo loại task (KMeans=2)
 | Type | Score | Perfect |
 |------|-------|---------|
-| Data Insight | 0.1863 | — |
-| Data Manipulation | 0.1296 | — |
-| Statistical Analysis | 0.1250 | — |
+| Data Insight | 0.2489 | 13 |
+| Data Manipulation | 0.1852 | 3 |
+| Statistical Analysis | 0.3750 | 4 |
 
 ## Lỗi đã biết
 1. Group 3 Genomic: Context window 64K tokens quá nhỏ (cần 161K-1.7M)

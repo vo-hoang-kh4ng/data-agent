@@ -79,31 +79,64 @@ class RuleLibrary:
         """Lấy danh sách các luật tốt nhất để tiêm vào Prompt."""
         if not self.rules:
             return ""
-        
+
         best_rules = self.rules[:top_k]
         rule_strings = [f"- {r['rule_text']} (MDL Score: {r['mdl_score']:.2f})" for r in best_rules]
         return "\n".join(rule_strings)
+
+    def get_relevant_rules(self, error_type: str = "", top_k=5) -> str:
+        """Lấy rules liên quan đến loại lỗi cụ thể (cho DA-Code).
+
+        Args:
+            error_type: Category của lỗi (KeyError, FileNotFoundError, ValueError, etc.)
+            top_k: Số rules tối đa trả về.
+        """
+        if not self.rules:
+            return ""
+
+        # If error_type specified, try to match rules containing related keywords
+        if error_type:
+            error_keywords = {
+                "KeyError": ["column", "key", "name", "field"],
+                "FileNotFoundError": ["file", "path", "load", "read"],
+                "ValueError": ["value", "type", "convert", "parse", "NaN", "nan"],
+                "TypeError": ["type", "convert", "cast", "string", "float", "int"],
+            }
+            keywords = error_keywords.get(error_type, [])
+            if keywords:
+                relevant = [r for r in self.rules
+                           if any(kw in r["rule_text"].lower() for kw in keywords)]
+                if relevant:
+                    relevant.sort(key=lambda x: x["mdl_score"])
+                    best = relevant[:top_k]
+                    return "\n".join(f"- {r['rule_text']} (MDL: {r['mdl_score']:.2f})" for r in best)
+
+        # Fallback to top rules
+        return self.get_top_rules(top_k)
 
 
 def extract_rule_from_reflexion(failed_code: str, error_log: str, fixed_code: str, client, model="llama-3.1-8b-instant") -> str:
     """
     Sử dụng LLM để rút trích một luật sửa lỗi ngắn gọn từ quá trình Reflexion thành công.
+    Uses get_response_from_llm for compatibility with all model backends (including streaming proxies).
     """
     system_prompt = (
         "You are an expert rule classification specialist for the RIMRULE system. "
-        "Your task is to analyze a failed code snippet, its error log, and the successful fixed code, "
+        "Your task is to analyze a failed data analysis code snippet, its error log, and the successful fixed code, "
         "and distill a single, highly generalizable, concise rule (heuristic) to prevent this error in the future.\n\n"
         "Guidelines:\n"
         "- The rule must be very concise (under 20 words if possible).\n"
-        "- The rule must be generalizable (e.g., 'Always #include <vector> when using std::vector in C++').\n"
+        "- Focus on data analysis patterns: file paths, column names, NaN handling, type conversions, "
+        "encoding issues, pandas operations, JSON output format.\n"
+        "- The rule must be generalizable (e.g., 'Always check column names with df.columns before accessing').\n"
         "- Output ONLY the rule text, nothing else. No markdown, no explanations."
     )
-    
+
     # Rút gọn context để tránh vượt token limit
     failed_code = failed_code[-1000:] if len(failed_code) > 1000 else failed_code
     fixed_code = fixed_code[-1000:] if len(fixed_code) > 1000 else fixed_code
     error_log = error_log[-1000:] if len(error_log) > 1000 else error_log
-    
+
     user_prompt = f"""Failed Code snippet:
 {failed_code}
 
@@ -116,17 +149,26 @@ Successfully Fixed Code:
 Based on the above, write ONE concise rule that caused this fix:"""
 
     try:
-        response = client.chat.completions.create(
+        # Use get_response_from_llm for streaming proxy compatibility
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from dgm_agent.llm import get_response_from_llm
+
+        response, _ = get_response_from_llm(
+            msg=user_prompt,
+            client=client,
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            system_message=system_prompt,
+            msg_history=[],
             temperature=0.3,
-            max_tokens=50
         )
-        rule = response.choices[0].message.content.strip()
-        return rule
+        if response:
+            rule = response.strip()
+            # Remove markdown artifacts
+            if rule.startswith("```"):
+                rule = rule.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            return rule
+        return ""
     except Exception as e:
         logging.error(f"Rule extraction failed: {e}")
         return ""

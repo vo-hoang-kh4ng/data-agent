@@ -54,3 +54,65 @@ class DynamicCapacityManager:
                 "temperature": 0.8,
                 "current_iteration": current_iteration
             }
+
+    def allocate_budget_for_dacode(self, task_hardness: str = "Medium", task_category: str = "",
+                                      epiplexity_score: float = None) -> dict:
+        """Cấp ngân sách cho DA-Code benchmark.
+
+        v2 FIX: Lower temperature across the board for deterministic code generation.
+        Previous version pushed temperature to 0.5 for ALL tasks due to flat NCD signal.
+        Now uses question complexity score [0.3, 1.5] that actually discriminates.
+
+        Budget strategy:
+        - Hardness → base budget (primary)
+        - Complexity score → fine-tune retries within band (secondary)
+        - Temperature stays LOW (0.15–0.3) for deterministic code
+        - Statistical Analysis → +1 retry bonus
+        """
+        print(f"📊 Đánh giá ngân sách DA-Code (Hardness: {task_hardness}, Category: {task_category}, "
+              f"Complexity: {epiplexity_score:.3f})…" if epiplexity_score is not None
+              else f"📊 Đánh giá ngân sách DA-Code (Hardness: {task_hardness}, Category: {task_category})…")
+
+        # Phase 1: Base budget từ task hardness (LOW temperature for deterministic code)
+        if task_hardness == "Easy":
+            budget = {
+                "max_retries": 3,
+                "num_candidates": 1,
+                "temperature": 0.15,
+            }
+        elif task_hardness == "Hard":
+            budget = {
+                "max_retries": 5,
+                "num_candidates": 1,
+                "temperature": 0.3,
+            }
+        else:  # Medium (default)
+            budget = {
+                "max_retries": 4,
+                "num_candidates": 1,
+                "temperature": 0.2,
+            }
+
+        # Phase 2: Complexity-driven fine-tuning (question analysis score [0.3, 1.5])
+        if epiplexity_score is not None:
+            if epiplexity_score < 0.6:
+                # Simple task — keep base budget, no changes needed
+                print(f"   -> 🟢 Simple task (complexity={epiplexity_score:.3f}): base budget.")
+            elif epiplexity_score <= 1.0:
+                # Standard complexity — +1 retry for safety
+                budget["max_retries"] += 1
+                print(f"   -> 🟡 Standard (complexity={epiplexity_score:.3f}): +1 retry → {budget['max_retries']}.")
+            else:
+                # Complex (statistical tests, multi-table, etc.) — +2 retries
+                budget["max_retries"] += 2
+                print(f"   -> 🔴 Complex (complexity={epiplexity_score:.3f}): +2 retries → {budget['max_retries']}.")
+        else:
+            # No complexity score — use hardness-only defaults
+            print(f"   -> 📋 Hardness-only budget: {budget['max_retries']} retries, temp={budget['temperature']}.")
+
+        # Bonus retry cho Statistical Analysis (hardest category per results)
+        if task_category and "statistical" in task_category.lower():
+            budget["max_retries"] += 1
+            print(f"   -> 📈 Statistical Analysis bonus: +1 retry → {budget['max_retries']}")
+
+        return budget
