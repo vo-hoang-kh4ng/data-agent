@@ -26,7 +26,7 @@ DEFAULT_MANIFEST = os.path.join(DATA_DIR, "dacode_unified_manifest.jsonl")
 DEFAULT_RESULTS_FILE = os.path.join(DATA_DIR, "dacode_llm_judge_results.json")
 
 # ── DeepSeek Config ──
-DEEPSEEK_API_KEY = "sk-77a89fc79fd24cf7980ef5a7987112e6"
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 
