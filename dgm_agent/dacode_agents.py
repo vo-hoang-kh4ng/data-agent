@@ -213,21 +213,26 @@ CODE_PROMPT = """Now write the complete Python code to solve the question based 
 QUESTION:
 {question}
 
+{data_files}
+
 INSTRUCTIONS:
-- Use the EXACT file paths and column names from your exploration above.
+- Load data EXACTLY as described in the DATA section above. Use the real file paths given there with pd.read_csv()/pd.read_excel(). Do NOT invent or guess filenames.
 - Import all needed libraries (pandas, numpy, json, etc.).
 - Handle missing values (NaN) and type conversions carefully.
 - The final answer MUST be printed as JSON. DO NOT wrap in a "main-task" key.
 - If the question provides a JSON template like {{"key1": [...], "key2": [...]}}, follow that EXACT format:
   print(json.dumps({{"key1": value1, "key2": value2}}, indent=4))
 - String values should NOT be wrapped in lists unless the template shows a list.
-- For CSV output tasks, save to "result.csv" or as specified.
+- For CSV output tasks, save to the CURRENT directory using the bare name, e.g. df.to_csv("result.csv"). NEVER derive the output path from an input file's directory and NEVER write into the data-lake directory (the input paths are read-only); outputs must be written to the current working directory only.
+- Do NOT fabricate/dummy data. If a file or value is unavailable, compute from the real data or raise an error — never print placeholder "demo" data.
 - Return ONLY valid, executable Python code inside ```python ``` blocks."""
 
 REPAIR_PROMPT = """The code produced an error when executed:
 
 ERROR:
 {error}
+
+{data_files}
 
 DIAGNOSIS:
 {diagnosis}
@@ -329,11 +334,11 @@ class DACodeSolver:
         self.model = model
         self.rule_library = rule_library
 
-    def generate_code(self, question: str, msg_history: list) -> Tuple[Optional[str], list]:
+    def generate_code(self, question: str, msg_history: list, data_files: str = "") -> Tuple[Optional[str], list]:
         """Generate Python code based on accumulated plan + exploration.
         Returns (code, msg_history).
         """
-        prompt = CODE_PROMPT.format(question=question)
+        prompt = CODE_PROMPT.format(question=question, data_files=data_files)
         response, msg_history = get_response_from_llm(
             msg=prompt,
             client=self.client,
@@ -347,7 +352,7 @@ class DACodeSolver:
         code = self._extract_python_code(response)
         return code, msg_history
 
-    def repair_code(self, code: str, error: str, diagnosis: str, rules: str = "") -> Optional[str]:
+    def repair_code(self, code: str, error: str, diagnosis: str, rules: str = "", data_files: str = "") -> Optional[str]:
         """Repair code based on error, diagnosis, and RIMRULE rules.
         Returns fixed code or None.
         """
@@ -356,6 +361,7 @@ class DACodeSolver:
             error=error_str,
             diagnosis=diagnosis or "No diagnosis available.",
             rules=rules or "No rules available yet.",
+            data_files=data_files,
         )
         response, _ = get_response_from_llm(
             msg=prompt,
@@ -402,7 +408,7 @@ class DACodeVerifier:
         self.model = model
 
     def execute_and_validate(self, code: str, task_id: str, sandbox_dir: str,
-                              timeout: int = 120) -> Dict:
+                              timeout: int = 120, loading_prefix: str = "") -> Dict:
         """Execute code in sandbox and validate output.
 
         Returns verdict dict:
@@ -421,13 +427,16 @@ class DACodeVerifier:
             result["error"] = "Empty or too short code"
             return result
 
-        # Run in sandbox
+        # Run in sandbox. Prepend the loading prefix (real df_file_N = read_csv(...) lines)
+        # so the data the model is TOLD is "already loaded" actually exists at runtime —
+        # even if the model obeys and omits its own read_csv calls.
         task_sandbox = os.path.join(sandbox_dir, task_id)
         os.makedirs(task_sandbox, exist_ok=True)
         script_path = os.path.join(task_sandbox, "_sandbox_run.py")
 
+        full_code = (loading_prefix + "\n\n" + code) if loading_prefix else code
         with open(script_path, "w", encoding="utf-8") as f:
-            f.write(code)
+            f.write(full_code)
 
         try:
             proc = subprocess.run(
@@ -437,9 +446,21 @@ class DACodeVerifier:
                 cwd=task_sandbox,
             )
             if proc.returncode == 0:
-                result["success"] = True
-                result["output"] = proc.stdout.strip()
-                result["format_valid"] = self._check_output_format(proc.stdout)
+                stdout = proc.stdout.strip()
+                if self._looks_fabricated(stdout):
+                    # The model failed to read the real file and printed dummy/demo data.
+                    # Treat as a failure so the repair loop fixes the file path instead of
+                    # silently scoring 0 on fabricated output (the global-discovery failure mode).
+                    result["success"] = False
+                    result["error"] = (
+                        "Output contains FABRICATED/dummy data (e.g. 'dummy', 'placeholder', "
+                        "'for demonstration', 'No dataset found'). The real data file was not read. "
+                        "Use the real file paths from the DATA section with pd.read_csv(); do NOT invent data."
+                    )
+                else:
+                    result["success"] = True
+                    result["output"] = stdout
+                    result["format_valid"] = self._check_output_format(stdout)
             else:
                 result["error"] = (proc.stderr + "\n" + proc.stdout).strip()
         except subprocess.TimeoutExpired:
@@ -495,6 +516,25 @@ class DACodeVerifier:
         if re.search(r'\{.*\}', output, re.DOTALL):
             return True
         return False
+
+    @staticmethod
+    def _looks_fabricated(stdout: str) -> bool:
+        """Detect fabricated/dummy data the model prints when it cannot find the real file.
+
+        None of these phrases appear in a legitimate DA-Code output (JSON values or CSV
+        rows). Their presence means the real file was not read and the model invented data.
+        """
+        if not stdout:
+            return False
+        low = stdout.lower()
+        markers = (
+            "creating dummy", "dummy data", "for demonstration", "demo purposes",
+            "placeholder", "fabricated", "mock data", "creating sample data",
+            "sample data for", "no dataset found", "no data found",
+            "dataset not found", "could not find the dataset", "using dummy",
+            "no file found", "file not found at",
+        )
+        return any(m in low for m in markers)
 
     @staticmethod
     def find_csv_results(task_id: str, sandbox_dir: str) -> List[str]:

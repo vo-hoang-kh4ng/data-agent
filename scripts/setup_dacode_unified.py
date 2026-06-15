@@ -86,7 +86,7 @@ def build_unified_lake(retained_ids, source_dir, lake_dir):
     SKIP_NAMES = {
         "README.md", "tips.md", ".DS_Store", "tips.txt", "guidance.txt",
         "step.md", "workflow.md", "analysis.py", "playerposition.txt",
-        "BMI.txt", "age.txt", "iqr.txt", "data_standard.md",
+        "BMI.txt", "age.txt", "iqr.txt", "data_standard.md", "weight_class.md",
         "relevant_avocado_categories.txt", "relevant_olive_oil_categories.txt",
         "relevant_sourdough_categories.txt",
     }
@@ -118,8 +118,15 @@ def build_unified_lake(retained_ids, source_dir, lake_dir):
             if not os.path.isfile(src_file):
                 continue
 
-            # Filter: skip non-data files
-            if fname in SKIP_NAMES or fname in GOLD_TEMPLATE_NAMES or fname.startswith('.'):
+            # Filter: skip non-data files (exact names + hint/gold patterns).
+            # Substring check catches task-prefixed hint variants from the dedup
+            # collision path (e.g. "dm-csv-020_guidance.txt"); only safe, hint-specific
+            # substrings are used to avoid false positives on real data files.
+            stem = os.path.splitext(fname)[0].lower()
+            hint_substrings = ("tips", "guidance", "data_standard", "weight_class",
+                               "playerposition", "relevant_")
+            if (fname in SKIP_NAMES or fname in GOLD_TEMPLATE_NAMES or fname.startswith('.')
+                    or any(s in stem for s in hint_substrings)):
                 total_filtered += 1
                 continue
 

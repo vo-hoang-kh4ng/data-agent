@@ -289,6 +289,35 @@ class FileAgent:
 
 # ─────────────────────────── Cluster Factory ──────────────────────────────── #
 
+# Solution-methodology hints / gold-template files that must NEVER be ingested into the
+# agent's context. The data-discovery benchmark is only valid if the agent sees raw data
+# files — never answer methodology, category mappings, gold outputs, or filename hints.
+# (Benchmark-integrity guardrail; see DA-Code-README verification.)
+HINT_EXACT_NAMES = {
+    "README.md", ".DS_Store",
+    "result.csv", "sample_result.csv",            # gold output templates
+    "tips.txt", "tips.md", "guidance.txt", "step.md", "workflow.md",
+    "data_standard.md", "weight_class.md",
+    "playerposition.txt", "BMI.txt", "age.txt", "iqr.txt",
+    "relevant_avocado_categories.txt", "relevant_olive_oil_categories.txt",
+    "relevant_sourdough_categories.txt",
+}
+# Substrings (matched against the file STEM, lowercased) flagging task-prefixed hint
+# variants produced by the dedup collision path (e.g. "dm-csv-020_guidance.txt").
+HINT_STEM_SUBSTRINGS = ("tips", "guidance", "step", "workflow", "data_standard",
+                        "playerposition", "relevant_", "weight_class")
+
+
+def _is_hint_or_gold_file(path) -> bool:
+    """True if `path` is a solution hint / gold template that must be excluded from the
+    agent's view of the data lake (answer leakage prevention)."""
+    name = path.name
+    if name in HINT_EXACT_NAMES or name.startswith('.'):
+        return True
+    stem = path.stem.lower()
+    return any(s in stem for s in HINT_STEM_SUBSTRINGS)
+
+
 def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 8, use_semantic: bool = True) -> List[FileAgent]:
     """
     Tự động nhóm các file trong data_lake_dir thành các cụm (cluster).
@@ -300,7 +329,16 @@ def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 8, use_se
         return []
 
     DATA_EXTS = {".csv", ".xlsx", ".xls", ".ods", ".json", ".txt", ".tsv"}
-    all_files = [str(f) for f in data_root.rglob("*") if f.is_file() and f.suffix.lower() in DATA_EXTS]
+    all_files = [
+        str(f) for f in data_root.rglob("*")
+        if f.is_file() and f.suffix.lower() in DATA_EXTS and not _is_hint_or_gold_file(f)
+    ]
+    _rejected = sum(
+        1 for f in data_root.rglob("*")
+        if f.is_file() and f.suffix.lower() in DATA_EXTS and _is_hint_or_gold_file(f)
+    )
+    if _rejected:
+        print(f"  🛡️  Excluded {_rejected} hint/gold-template file(s) from agent context (data-discovery integrity).")
 
     if not all_files:
         print(f"  ⚠️ Không tìm thấy file dữ liệu trong: {data_lake_dir}")
@@ -313,7 +351,13 @@ def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 8, use_se
             from sklearn.cluster import KMeans as _KMeans
             from openai import OpenAI as _OAI
 
-            N_CLUSTERS = min(2, len(all_files) // 2)  # Best: KMeans=2 (score=0.2529, 20/91 perfect)
+            # KMeans K is configurable via DACODE_KMEANS_K. Default 8 = the best config on the
+            # paper-faithful clean 147-file lake (K-sweep: K=8 wins both μ_generation and
+            # μ_retrieval F1; the v1 default of 2 was tuned for the buggy 172-file legacy lake).
+            # max(1, min(K, len//2)) guards per-subtask lakes with few files: KMeans needs
+            # n_clusters>=1 and n_clusters<=n_samples.
+            K_CLUSTER = int(os.environ.get("DACODE_KMEANS_K", "8"))
+            N_CLUSTERS = max(1, min(K_CLUSTER, len(all_files) // 2))
 
             # Build file descriptions: filename + first 200 chars
             descriptions = []
@@ -333,7 +377,7 @@ def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 8, use_se
             embed_model = os.environ.get("EMBED_MODEL", "hosted_vllm/intfloat/multilingual-e5-large")
 
             if embed_key and len(all_files) >= N_CLUSTERS:
-                embed_client = _OAI(api_key=embed_key, base_url=embed_base)
+                embed_client = _OAI(api_key=embed_key, base_url=embed_base, timeout=60.0, max_retries=1)
 
                 # Batch embed
                 all_embeddings = []

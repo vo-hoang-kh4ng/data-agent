@@ -100,26 +100,57 @@ class DACodeOrchestrator:
 
     # ── Context Builders (reuse from blackboard) ──
 
-    def _build_compact_context(self, bb: Blackboard) -> str:
-        """Compact context: file names + columns + dtypes only."""
-        lines = ["=== AVAILABLE DATA FILES (compact) ===\n"]
-        sorted_resp = sorted(bb.responses, key=lambda r: r.relevance_score, reverse=True)
-        for resp in sorted_resp:
-            lines.append(f"\n[Cluster: {resp.cluster_name}] (relevance: {resp.relevance_score:.2f})")
+    def _build_compact_context(self, bb: Blackboard, detail_top_k: int = 25,
+                                max_chars: int = 40000) -> str:
+        """Compact context that lists ALL lake filenames/paths (visibility guaranteed),
+        then columns/dtypes for the top-K files by relevance.
+
+        Replaces the old per-cluster cap (15/cluster) which silently truncated the
+        relevant file out of view on large lakes — the global discovery failure mode
+        where the gold file never reached the planner/solver (e.g. di-text-001's
+        ``world-data-2023.csv`` appeared in 0 trajectory steps). Phase A lists every
+        file compactly so the right name is always visible; Phase B adds detail within
+        the char budget so truncation, if any, only drops columns/dtypes, not names.
+        """
+        # Flatten all files across clusters, sorted globally by relevance.
+        flat = []  # (relevance, cluster_name, fc)
+        for resp in bb.responses:
             for fc in resp.file_contexts:
+                flat.append((resp.relevance_score, resp.cluster_name, fc))
+        flat.sort(key=lambda x: x[0], reverse=True)
+
+        lines = ["=== AVAILABLE DATA FILES IN THE DATA LAKE (ALL files listed) ===\n",
+                 "--- ALL FILES (basename -> path), sorted by relevance ---"]
+        for rel, cname, fc in flat:
+            tag = "  -> ERROR" if fc.error else ""
+            lines.append(f"  {os.path.basename(fc.file_path)}  ->  {fc.file_path}{tag}")
+        lines.append("")
+
+        # Phase B: columns/dtypes for the top-K by relevance, within the char budget.
+        used = len("\n".join(lines))
+        if flat and used < max_chars - 500:
+            lines.append("--- DETAILED (columns/dtypes) for the most relevant files ---")
+            for rel, cname, fc in flat[:detail_top_k]:
                 if fc.error:
-                    lines.append(f"  {fc.file_path}  -> ERROR: {fc.error}")
                     continue
-                lines.append(f"  {fc.file_path}  (type={fc.file_type})")
+                detail = [f"  {os.path.basename(fc.file_path)} (type={fc.file_type})"]
                 if fc.sheets:
-                    lines.append(f"    Sheets: {fc.sheets}")
+                    detail.append(f"    Sheets: {fc.sheets}")
                 if fc.columns:
-                    lines.append(f"    Columns: {fc.columns}")
+                    detail.append(f"    Columns: {fc.columns}")
                 if fc.dtypes:
-                    dtype_str = ", ".join(f"{k}: {v}" for k, v in fc.dtypes.items())
-                    lines.append(f"    Dtypes: {dtype_str}")
-            lines.append("")
-        return "\n".join(lines)
+                    detail.append("    Dtypes: " + ", ".join(f"{k}:{v}" for k, v in fc.dtypes.items()))
+                block = "\n".join(detail)
+                if used + len(block) + 1 > max_chars:
+                    lines.append("  ... (further details omitted to stay within context window)")
+                    break
+                lines.append(block)
+                used += len(block) + 1
+
+        full = "\n".join(lines)
+        if len(full) > max_chars:
+            full = full[:max_chars] + "\n... [COMPACT CONTEXT TRUNCATED]"
+        return full
 
     def _build_detailed_context(self, bb: Blackboard) -> str:
         """Detailed context with file previews for top-3 clusters."""
@@ -149,6 +180,128 @@ class DACodeOrchestrator:
         if len(full_context) > 40000:
             full_context = full_context[:40000] + "\n...[CONTEXT TRUNCATED]..."
         return full_context
+
+    def _build_file_paths_block(self, bb: Blackboard) -> str:
+        """Pre-loaded DataFrame skeleton injected DIRECTLY into Solver/Repair/Fallback prompts.
+
+        Qwen-35B unreliably uses provided file paths — even with exact pd.read_csv(r"...")
+        lines and a 'do NOT use data.csv' warning in the prompt, it reverts to a 'data.csv'
+        prior and hallucinates a sandbox path. The robust fix is to REMOVE its opportunity
+        to get paths wrong: present the data as ALREADY LOADED into named DataFrames
+        (df_file_0, df_file_1, ...) and instruct it to use those directly. The actual
+        read_csv lines are kept so the generated script is self-contained & runnable.
+        """
+        seen = set()
+        lines = [
+            "=== DATA ALREADY LOADED (the lines below run first; use df_file_0, df_file_1, ... directly) ===",
+            "import pandas as pd",
+        ]
+        n = 0
+        max_files = 10  # cap preloaded DataFrames (global lake has 172 files)
+        for resp in sorted(bb.responses, key=lambda r: r.relevance_score, reverse=True):
+            if n >= max_files:
+                break
+            for fc in resp.file_contexts:
+                if n >= max_files:
+                    break
+                if fc.error or fc.file_path in seen:
+                    continue
+                seen.add(fc.file_path)
+                ftype = (fc.file_type or "").lower()
+                if ftype in ("xlsx", "xls", "ods"):
+                    loader = "pd.read_excel"
+                elif ftype == "json":
+                    loader = "pd.read_json"
+                else:
+                    loader = "pd.read_csv"
+                cols = ", ".join(list(fc.columns)[:12]) if fc.columns else "?"
+                lines.append(f'df_file_{n} = {loader}(r"{fc.file_path}")   # columns: {cols}')
+                n += 1
+        if n == 0:
+            return ""
+        lines.append("=" * 82)
+        lines.append(f"Use df_file_0 .. df_file_{n - 1} DIRECTLY. Do NOT call read_csv/read_excel "
+                     f"or invent filenames like 'data.csv' — the data is already loaded above.")
+        return "\n".join(lines)
+
+    def _preload_blocks(self, bb: Blackboard):
+        """Return (solver_data_block, loading_prefix).
+
+        - Small lake (≤12 files): preload DataFrames as df_file_N (easy discovery).
+        - Large lake (>12 files, real discovery): pass the FULL list of real lake file
+          paths plus explicit instructions to call pd.read_csv/read_excel with ONLY those
+          paths. This fixes the global failure where the solver was told "data is already
+          loaded" (no df_file_N exists in global mode) and had no real filenames → it
+          hallucinated filenames and printed dummy data.
+        """
+        n_files = sum(len(r.file_contexts) for r in bb.responses)
+        if n_files <= 12:
+            return self._build_file_paths_block(bb), self._build_loading_prefix(bb)
+        return self._build_global_data_block(bb), ""
+
+    def _build_global_data_block(self, bb: Blackboard, max_files: int = 200) -> str:
+        """For large lakes (real discovery): list real file paths and instruct the solver
+        to read them itself with pd.read_csv/read_excel, using ONLY these paths."""
+        flat = [(r.relevance_score, fc) for r in bb.responses for fc in r.file_contexts]
+        flat.sort(key=lambda x: x[0], reverse=True)
+        lake_dir = ""
+        lines = ["=== AVAILABLE DATA FILES IN THE DATA LAKE ===",
+                 "The data is NOT preloaded. You MUST call pd.read_csv() / pd.read_excel() yourself.",
+                 "Use ONLY the real paths below. Pick the relevant file(s) by their name and columns",
+                 "(read each header to decide). Do NOT guess or invent filenames such as 'data.csv'.",
+                 ""]
+        for rel, fc in flat[:max_files]:
+            if fc.error:
+                continue
+            lines.append(f'  pd.read_csv(r"{fc.file_path}")   # {os.path.basename(fc.file_path)} (type={fc.file_type})')
+            if not lake_dir:
+                lake_dir = os.path.dirname(fc.file_path)
+        if lake_dir:
+            lines.append("")
+            lines.append("If unsure which file to use, inspect the lake first:")
+            lines.append(f'  import os; print(os.listdir(r"{lake_dir}"))')
+        lines.append("")
+        lines.append("CRITICAL: NEVER print dummy/placeholder/sample data. If a file is missing, raise")
+        lines.append("the error — do NOT fabricate data to 'demonstrate'.")
+        lines.append("")
+        lines.append("CRITICAL (OUTPUT PATH): Write your result file(s) to the CURRENT directory")
+        lines.append("(the run sandbox) using ONLY the bare output name, e.g. df.to_csv('result.csv').")
+        lines.append("NEVER derive the output path from an input file's directory. NEVER use")
+        lines.append("os.path.join(lake_dir, ...), os.path.dirname() of any path above, or any")
+        lines.append("absolute path. Every path listed above is a READ-ONLY input — your outputs")
+        lines.append("must land in the current working directory, nowhere else.")
+        return "\n".join(lines)
+
+    def _build_loading_prefix(self, bb: Blackboard) -> str:
+        """Executable prefix prepended to the model's code at run time (NOT shown in prompt).
+
+        Defines df_file_0, df_file_1, ... = pd.read_csv(r"<exact_path>") so that the
+        DataFrames the model is told are 'already loaded' actually exist, regardless of
+        whether the model obeys the instruction to omit its own read_csv calls.
+        """
+        seen = set()
+        lines = ["import pandas as pd"]
+        n = 0
+        max_files = 10  # cap preloaded DataFrames (global lake has 172 files)
+        for resp in sorted(bb.responses, key=lambda r: r.relevance_score, reverse=True):
+            if n >= max_files:
+                break
+            for fc in resp.file_contexts:
+                if n >= max_files:
+                    break
+                if fc.error or fc.file_path in seen:
+                    continue
+                seen.add(fc.file_path)
+                ftype = (fc.file_type or "").lower()
+                if ftype in ("xlsx", "xls", "ods"):
+                    loader = "pd.read_excel"
+                elif ftype == "json":
+                    loader = "pd.read_json"
+                else:
+                    loader = "pd.read_csv"
+                lines.append(f'df_file_{n} = {loader}(r"{fc.file_path}")')
+                n += 1
+        return "\n".join(lines) if n > 0 else ""
 
     # ── File Discovery ──
 
@@ -277,6 +430,7 @@ class DACodeOrchestrator:
         bb = self._discover_files(task)
         compact_ctx = self._build_compact_context(bb)
         detailed_ctx = self._build_detailed_context(bb)
+        solver_data_block, loading_prefix = self._preload_blocks(bb)
         trajectory = [{"action": "blackboard_discovery", "clusters_kept": len(bb.responses)}]
 
         # ═══ Phase 0.5: Epiplexity Estimation + CapacityManager Budget ═══
@@ -308,7 +462,7 @@ class DACodeOrchestrator:
         # ═══ Phase 2: Solver (Code Generation) ═══
         trajectory.append({"action": "solver_generate"})
         print(f"  💻 Solver: Generating code...")
-        code, msg_history = self.solver.generate_code(question, msg_history)
+        code, msg_history = self.solver.generate_code(question, msg_history, data_files=solver_data_block)
 
         if not code or len(code) < 10:
             trajectory.append({"action": "solver_failed"})
@@ -330,7 +484,8 @@ class DACodeOrchestrator:
         for round_idx in range(max_retries):
             # Verify (execute + validate)
             trajectory.append({"action": f"verifier_round_{round_idx}"})
-            verdict = self.verifier.execute_and_validate(code, task_id, self.sandbox_dir)
+            verdict = self.verifier.execute_and_validate(code, task_id, self.sandbox_dir,
+                                                          loading_prefix=loading_prefix)
 
             # Compute NCD epiplexity (question vs code) — the REAL Goldilocks metric
             ncd_epiplexity = compute_ncd_epiplexity(question, code)
@@ -368,7 +523,8 @@ class DACodeOrchestrator:
 
                 # Repair code
                 new_code = self.solver.repair_code(code, verdict["error"],
-                                                    json.dumps(diagnosis), rules)
+                                                    json.dumps(diagnosis), rules,
+                                                    data_files=solver_data_block)
 
                 if new_code and len(new_code) > 10:
                     # FIX: Extract RIMRULE IMMEDIATELY after each repair (not deferred)
@@ -416,13 +572,16 @@ class DACodeOrchestrator:
 QUESTION:
 {question}
 
+{solver_data_block}
+
 {context}
 
 INSTRUCTIONS:
-- Use the EXACT file paths shown above to load the data.
-- Import all needed libraries (pandas, numpy, json, etc.).
+- Load data EXACTLY as described in the DATA section above — use the real file paths with pd.read_csv()/pd.read_excel(). Do NOT invent filenames like "data.csv".
+- Import all needed libraries (numpy, json, etc.).
 - Handle missing values (NaN) appropriately.
 - The final answer MUST be printed as JSON. DO NOT wrap in a "main-task" key.
+- Do NOT fabricate/dummy data; if a file is unavailable, raise the error.
 - Return ONLY valid, executable Python code inside ```python ``` blocks."""
 
             response, _ = get_response_from_llm(
@@ -438,7 +597,8 @@ INSTRUCTIONS:
             if fallback_code and len(fallback_code) > 10:
                 for fb_round in range(2):  # 2 quick attempts
                     fb_verdict = self.verifier.execute_and_validate(
-                        fallback_code, task_id, self.sandbox_dir
+                        fallback_code, task_id, self.sandbox_dir,
+                        loading_prefix=loading_prefix
                     )
                     if fb_verdict["success"] and len(fb_verdict["output"]) > 0:
                         finished = True
@@ -512,18 +672,22 @@ INSTRUCTIONS:
         print(f"  🔄 Fallback: 1-shot generation (Planner/Solver failed)...")
 
         context = bb.get_context_summary() if hasattr(bb, 'get_context_summary') else ""
+        solver_data_block, loading_prefix = self._preload_blocks(bb)
         fallback_prompt = f"""You are an expert Data Scientist. Solve the following data science question using Python.
 
 QUESTION:
 {question}
 
+{solver_data_block}
+
 {context}
 
 INSTRUCTIONS:
-- Use the EXACT file paths shown above to load the data.
-- Import all needed libraries (pandas, numpy, json, etc.).
+- Load data EXACTLY as described in the DATA section above — use the real file paths with pd.read_csv()/pd.read_excel(). Do NOT invent filenames like "data.csv".
+- Import all needed libraries (numpy, json, etc.).
 - Handle missing values (NaN) appropriately.
 - The final answer MUST be printed as JSON. DO NOT wrap in a "main-task" key.
+- Do NOT fabricate/dummy data; if a file is unavailable, raise the error.
 - Return ONLY valid, executable Python code inside ```python ``` blocks."""
 
         response, _ = get_response_from_llm(
@@ -542,7 +706,8 @@ INSTRUCTIONS:
         for round_idx in range(self.max_debug_rounds):
             if not code or len(code) < 5:
                 break
-            verdict = self.verifier.execute_and_validate(code, task_id, self.sandbox_dir)
+            verdict = self.verifier.execute_and_validate(code, task_id, self.sandbox_dir,
+                                                          loading_prefix=loading_prefix)
             if verdict["success"] and len(verdict["output"]) > 0:
                 finished = True
                 output = verdict["output"]
@@ -553,7 +718,8 @@ INSTRUCTIONS:
 
                 old_code = code
                 new_code = self.solver.repair_code(code, verdict["error"],
-                                                    json.dumps(diagnosis), rules)
+                                                    json.dumps(diagnosis), rules,
+                                                    data_files=solver_data_block)
                 if new_code and len(new_code) > 10:
                     # Extract rule even from fallback repairs
                     self._extract_rule_from_repair(

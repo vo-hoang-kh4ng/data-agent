@@ -7,7 +7,7 @@ import anthropic
 import backoff
 import openai
 
-MAX_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS = 8192
 AVAILABLE_LLMS = [
     # Anthropic models
     "claude-3-5-sonnet-20240620",
@@ -96,13 +96,18 @@ def create_client(model: str):
             api_key_env = "QWEN_API_KEY"
         api_key = os.environ.get(api_key_env) or os.environ.get("OPENAI_API_KEY", "")
         print(f"Using hosted_vllm proxy ({base_url}) with model {model}.")
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        # Per-call timeout + single retry: without this a hung proxy connection blocks for the
+        # SDK default 600s, and an unbounded outer backoff can stall a task for hours.
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=120.0, max_retries=1)
         return client, model  # pass full model name as-is to proxy
     else:
         raise ValueError(f"Model {model} not supported.")
 
 # Get N responses from a single message, used for ensembling.
-@backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APITimeoutError))
+@backoff.on_exception(backoff.expo,
+                      (openai.RateLimitError, openai.APITimeoutError, openai.InternalServerError,
+                       openai.APIConnectionError, openai.APIError),
+                      max_time=120)
 def get_batch_responses_from_llm(
         msg,
         client,
@@ -183,7 +188,9 @@ def get_batch_responses_from_llm(
 
 @backoff.on_exception(
     backoff.expo,
-    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError),
+    (openai.RateLimitError, openai.APITimeoutError, openai.InternalServerError,
+     openai.APIConnectionError, openai.APIError,
+     anthropic.RateLimitError, anthropic.APIStatusError),
     max_time=120,
 )
 def get_response_from_llm(
@@ -311,7 +318,15 @@ def get_response_from_llm(
     else:
         # Fallback: OpenAI-compatible API (Groq hosted_vllm and others)
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        response = client.chat.completions.create(
+        # Qwen3.x-A3B-FP8 served via vLLM is a HYBRID REASONING model: by default it emits
+        # a <think> block that consumes part of the output-token budget BEFORE the answer.
+        # With MAX_OUTPUT_TOKENS=8192 (the Blackboard paper's per-step cap) there is room for
+        # BOTH the think block and the answer, so we now run with thinking ENABLED to match
+        # the paper's default-reasoning protocol (the paper runs reasoning backbones thinking-on).
+        # NOTE: the earlier 0.2529 / K-sweep runs used thinking OFF because the 4096 cap left no
+        # room for thinking -> truncation -> 0% finished. Results under thinking-OFF and
+        # thinking-ON are therefore NOT directly comparable.
+        create_kwargs = dict(
             model=model,
             messages=[
                 {"role": "system", "content": system_message},
@@ -320,8 +335,11 @@ def get_response_from_llm(
             temperature=temperature,
             max_tokens=MAX_OUTPUT_TOKENS,
             n=1,
-            stream=True
+            stream=True,
         )
+        if any(tag in model for tag in ("Qwen3", "3.5", "A3B")):
+            create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+        response = client.chat.completions.create(**create_kwargs)
         content = ""
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:

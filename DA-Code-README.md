@@ -2,71 +2,82 @@
 
 ## Tổng quan
 
-Đánh giá hệ thống **Triadic DGM** trên benchmark **DA-Code** — Data Analysis Code Generation (EMNLP 2024), theo hướng **data discovery**: agent chỉ nhận question + data lake (179 files), phải tự tìm dữ liệu liên quan, sinh code, tạo output để chấm bằng official evaluator.
+Đánh giá hệ thống **Triadic DGM** trên benchmark **DA-Code** — Data Analysis Code Generation (EMNLP 2024), theo hướng **data discovery**: agent chỉ nhận question + data lake (paper-faithful **147 files** sau khi loại hint/gold-template + fix case-clobber), phải tự tìm dữ liệu liên quan, sinh code, tạo output để chấm bằng official evaluator.
 
 **Paper tham chiếu:** "DA-Code: A Benchmark for LLM-Based Data Analysis Code Generation" (EMNLP 2024)
 **Paper Blackboard:** "LLM-based Multi-Agent Blackboard System for Information Discovery in Data Science" (arXiv 2510.01285)
 
 ---
 
-## Kết quả chính
+## Kết quả chính (v2, paper-faithful)
 
-### So sánh KMeans Clustering Config
+Setup: **91 retained tasks · clean 147-file unified lake (145 csv + 1 xls + 1 xlsx) · real discovery · official DA-Code evaluator · Qwen3.5-35B-A3B · thinking-ON + 8192 tokens** (paper's reasoning-on protocol).
 
-| Config | Score | Perfect | Finished | Thay đổi |
-|--------|-------|---------|----------|----------|
-| KMeans=26 | 0.1853 | 15/91 | 91/91 (100%) | baseline |
-| KMeans=16 | 0.2146 | 17/91 | 91/91 (100%) | +15.8% |
-| **KMeans=2** | **0.2529** | **20/91** | **91/91 (100%)** | **+36.5%** |
+### KMeans sweep (thinking-OFF — controlled K comparison)
 
-**Config tốt nhất: KMeans=2** — vượt DA-Code baseline (0.244, paper gốc).
+| K (KMeans) | clusters kept | μ_generation | perfect | μ_retrieval F1 | recall | halluc |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 2 | 0.1626 | 12/91 | 0.483 | 0.455 | 80% |
+| 4 | 4 | 0.1459 | 12/91 | 0.482 | 0.458 | 76% |
+| **8** | **5** | **0.2008** | **18/91** | **0.490** | **0.473** | 74% |
+| 16 | 5 | 0.2060 | 17/91 | 0.416 | 0.403 | 64% |
 
-### So sánh với baselines
+**K=8 là config tốt nhất** — thắng trên cả generation lẫn discovery F1. Generation bão hòa ở K≥8; discovery F1 đạt đỉnh K=8 rồi giảm ở K=16 (relevance filter giới hạn ~5 cluster hiệu quả). **v2 default = K=8** (env `DACODE_KMEANS_K`).
 
-| System | Score | Perfect | Model |
-|--------|-------|---------|-------|
-| DA-Code baseline (paper) | 0.244 | 21/91 | GPT-4 |
-| Blackboard + Claude 4 Opus (paper) | 0.0714 | — | Claude 4 Opus |
-| Blackboard + Gemini 2.5 Pro (paper) | 0.0934 | — | Gemini 2.5 Pro |
-| Blackboard + Qwen3-Coder-30B (paper) | 0.0111 | — | Qwen3-Coder |
-| **Triadic DGM (ours)** | **0.2529** | **20/91** | **Qwen 3.5 35B** |
+### So sánh với baselines (K=8, thinking-ON — v2 default)
 
-### Kết quả chi tiết (KMeans=2)
+| System | μ_generation | μ_retrieval F1 | Model | Setting |
+|--------|-------|---------|-------|---------|
+| Blackboard + Qwen3-Coder-30B (paper) | 0.0111 | — | Qwen3-Coder | Discovery, 91 tasks |
+| Blackboard + Claude 4 Opus (paper) | 0.0714 | — | Claude 4 Opus | Discovery, 91 tasks |
+| Blackboard + Gemini 2.5 Pro (paper) | 0.0934 | 0.64 | Gemini 2.5 Pro | Discovery, 91 tasks |
+| DA-Code paper (Huang 2024) | 0.244 | — | GPT-4 | ⚠️ **Non-discovery**, 500 tasks |
+| **Triadic DGM (ours, K=8 think-ON)** | **0.1912** | **0.599** | **Qwen 3.5 35B-A3B** | Discovery, 91 tasks |
+
+→ **2.05× Blackboard+Gemini-2.5-Pro và 17.2× Blackboard+Qwen3-Coder** về generation; **94% discovery F1** của Blackboard. ⚠ Bội số **Gemini không** backbone-controlled (khác model); bội số **Qwen3-Coder (17.2×) mới là so sánh công bằng** (cùng họ model). Bật thinking (4096→8192) tăng discovery F1 0.49→0.60, generation flat trong nhiễu (0.20→0.19).
+
+> ⚠️ **Không so sánh trực tiếp với DA-Code paper 0.244** — đó là **non-discovery** setting (agent được cho sẵn đúng file, 500 tasks, GPT-4). Baseline cùng discovery-setting là các dòng Blackboard.
+>
+> ❌ **Headline cũ "0.2529 / 2.7× Gemini" (v1) bị INVALIDATE.** Nó đến từ **legacy lake 172-file lỗi** — bug case-clobber trên Windows (`tables.csv` vs `Tables.csv` gộp thành 1 path → 9 task đọc sai data) + 7 file answer/hint rò rỉ trong lake. Không so sánh được với paper protocol; **bị thay thế** bởi kết quả 147-file controlled ở trên (xem v2 changelog cuối file).
+
+### Kết quả chi tiết (K=8, thinking-ON — v2 default)
 
 **Theo loại task:**
 
-| Category | Score | Perfect | Total |
+| Category | μ_generation | Perfect | Total |
 |----------|-------|---------|-------|
-| Data Insight | 0.2489 | 13 | 61 |
+| Data Insight | 0.1814 | 9 | 61 |
 | Data Manipulation | 0.1852 | 3 | 18 |
-| Statistical Analysis | 0.3750 | 4 | 12 |
+| Statistical Analysis | 0.2500 | 3 | 12 |
 
 **Theo độ khó:**
 
-| Hardness | Score | Total |
-|----------|-------|-------|
-| Easy | 0.1944 | 12 |
-| Medium | 0.2886 | 63 |
-| Hard | 0.1562 | 16 |
+| Hardness | μ_generation | Perfect | Total |
+|----------|-------|---------|-------|
+| Easy | 0.1944 | 2 | 12 |
+| Medium | 0.1862 | 10 | 63 |
+| Hard | 0.2083 | 3 | 16 |
 
 **Theo loại đánh giá:**
 
-| Eval Type | Score | Perfect | Total |
+| Eval Type | μ_generation | Perfect | Total |
 |-----------|-------|---------|-------|
-| text (JSON key-value) | 0.3556 | 16 | 45 |
-| csv (hash-based F1) | 0.1525 | 4 | 46 |
+| text (JSON key-value) | 0.2231 | 9 | 45 |
+| csv (hash-based F1) | 0.1599 | 6 | 46 |
 
 ---
 
 ## Data-Discovery Setting
 
 ```
-Agent nhận:  question + data_lake (179 files)
-Agent KHÔNG nhận:  gold_dir, eval_result, correct files
+Agent nhận:     question + data_lake (paper-faithful 147 files)
+Agent KHÔNG nhận: gold_dir, eval_result, correct files, hint/guidance/tips
 
-91 tasks chia từ 500 tasks gốc (lọc bỏ task lỗi/duplicate)
-Data lake: 179 files (163 CSV, 8 JSON, 3 TXT, 3 MD, 1 XLSX, 1 XLS)
-            aggregated từ source files của 91 tasks, dedup (filename, content_hash)
+91 retained task IDs (Appendix G, paper Blackboard)
+Data lake: 147 files (145 csv + 1 xls + 1 xlsx)
+            union của source-input files của 91 tasks, loại hint/gold-template (anti-leak),
+            dedup (filename, content_hash), disambiguate case-collision bằng task-prefix
+            → 6-dimension integrity-verified (0 case-collision, 0 leak, 0 missing)
 ```
 
 ---
@@ -78,7 +89,7 @@ DA-Code Task (question, data_lake_dir, hardness)
     │
     ▼
 [Phase 0: Blackboard Discovery]
-    │  E5-Large embeddings → KMeans clustering (2 clusters)
+    │  E5-Large embeddings → KMeans clustering (K=8, configurable via DACODE_KMEANS_K)
     │  FileAgent quét từng cluster → relevance scoring → top-K filter
     │  Output: compact_context + detailed_context
     ▼
@@ -139,7 +150,7 @@ git clone https://github.com/Leo-CHL/DA-Code.git da-code-repo
 # https://drive.google.com/file/d/1eM_FVT1tlY4XXp6b7TrKzgTWOvskrjTs/view
 # Extract vào data/dacode_source/source/
 
-# Setup unified data lake (aggregates 179 files from 91 tasks)
+# Setup paper-faithful data lake (aggregates 147 files from 91 tasks, after hint/gold cleanup)
 python scripts/setup_dacode_unified.py
 ```
 
@@ -204,7 +215,7 @@ data-agent/
 │   ├── eval_official.py           # Official evaluator wrapper
 │   └── configs/eval_all.jsonl     # Eval configs cho 91 tasks
 ├── data/
-│   ├── dacode_lake/               # 179 files data lake
+│   ├── dacode_lake_paper/         # 147 files paper-faithful data lake (clean, after hint/gold cleanup)
 │   ├── dacode_sandbox/            # Task outputs (91 dirs)
 │   ├── dacode_gold/gold/          # Gold standard files
 │   ├── dacode_unified_manifest.jsonl  # 91 task definitions
@@ -220,15 +231,23 @@ data-agent/
 
 ## Phân tích kết quả
 
-### Tại sao KMeans=2 tốt nhất?
-- 2 clusters lớn (83-93 files/cluster) → agent quét gần như toàn bộ data lake
-- Ít rủi ro bỏ sót file quan trọng do clustering sai
-- KMeans=26 (11 files/cluster) đôi khi lọc sai cluster → mất file cần thiết
+### Tại sao KMeans=8 tốt nhất (paper-faithful clean lake)?
+- Relevance filter giữ lại ~5 cluster hiệu quả cho mọi K≥8 → K8/K16 chỉ khác partition
+- Generation bão hòa ở K≥8 (K8 0.201 ≈ K16 0.206, cả hai >> K2 0.163 / K4 0.146)
+- Discovery F1 đạt đỉnh K=8 (0.490) rồi GIẢM ở K=16 (0.416) → K=8 là điểm ngọt
+- ⚠ ngược với legacy lake lỗi cũ (K2>K16>K26) — clean faithful setup thưởng clustering mịn hơn đến ~5 cluster
 
-### Điểm yếu chính
-- **CSV eval** (0.1525): Nhiều task CSV trả sai format hoặc sai giá trị
-- **Hard tasks** (0.1562): Task khó cần nhiều bước reasoning, model 35B chưa đủ
-- **72/91 tasks score=0**: Lỗi phổ biến — wrong file loading, wrong column selection, format mismatch
+### Điểm yếu chính (v2, K=8 thinking-ON)
+- **CSV eval** (0.1599, 6/46 perfect): nhiều task trả sai format hoặc sai giá trị hash
+- **Hard tasks** (0.2083, 3/16): task multi-step reasoning vượt khả năng backbone 35B
+- **76/91 chưa perfect**: chọn sai file giữa các file cùng tên (đã disambiguate bằng task-prefix), sai cột, format mismatch
+
+### v2 changelog (bug fixes vs v1's 0.2529)
+1. **Clean 147-file lake** thay lake lỗi 172-file: 0 case-collision (disambiguate task-prefix), 0 leak answer (loại hint/gold-template), verify 6 chiều.
+2. **Discovery→solver interface fix**: solver nhận real lake paths + "read yourself" (v1 báo "data already loaded" nhưng global mode không có file thật → hallucinate + dummy data); compact context list ALL files.
+3. **Lake-write-pollution fix**: agent không ghi output vào lake dir (147→152 mid-run v1); instruction + `scrub_lake()` guard → lake giữ nguyên 147 end-to-end.
+4. **Anti-fabrication guard**: verifier reject dummy/placeholder output → repair loop fix path thay vì im lặng score 0.
+5. **Thinking-ON + 8192** (paper reasoning-on protocol); v1 cap 4096 truncate think block → 0% finished.
 
 ### RIMRULE Rules học được (top 5)
 1. Always verify df.columns before accessing specific column names (KeyError)
@@ -246,8 +265,12 @@ data-agent/
 model: hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8
 api: https://proxy.onebot.meobeo.ai/v1
 
+# dgm_agent/llm.py
+MAX_OUTPUT_TOKENS: 8192   # v2: paper reasoning-on protocol (v1: 4096 truncated think block)
+thinking: ON              # enable_thinking=True for Qwen3.x-A3B hybrid-reasoning
+
 # blackboard.py
-N_CLUSTERS: 2           # Best config (score=0.2529)
+N_CLUSTERS: 8           # v2 best (K-sweep on clean 147-file lake); env DACODE_KMEANS_K
 embedding: E5-Large     # intfloat/e5-large-v2 (1024 dim)
 
 # dacode_orchestrator.py
