@@ -15,6 +15,7 @@ pydantic
 scikit-learn
 statsmodels
 openpyxl
+datasets
 fastapi
 uvicorn
 python-multipart

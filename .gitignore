@@ -82,6 +82,11 @@ blade_benchmark/
 *.joblib
 *.png
 
+# Triadic DGM eval harness — runtime artifacts (regenerable, not source)
+results/
+_triadic_eval_scripts/
+_triadic_eval_memory/
+
 # ==========================================
 #        Node.js & Frontend Artifacts
 # ==========================================
