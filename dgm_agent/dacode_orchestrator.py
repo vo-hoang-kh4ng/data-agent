@@ -34,7 +34,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=True)
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=False)
 
 from dgm_agent.blackboard import DSBlackboardAgent, build_file_agents, Blackboard, BlackboardRequest
 from dgm_agent.dacode_agents import (
@@ -423,6 +423,10 @@ class DACodeOrchestrator:
             print(f"  ⏭️ Already done: {task_id}")
             return {"task_id": task_id, "skipped": True}
 
+        # Reset active task token usage
+        from dgm_agent.llm import reset_active_task_token_usage, get_active_task_token_usage
+        reset_active_task_token_usage()
+
         t_start = time.time()
         print(f"\n[{task_id}] {question[:80]}...")
 
@@ -446,21 +450,35 @@ class DACodeOrchestrator:
         # Adaptive rounds: hard tasks get 5 rounds
         if task_hardness == "Hard":
             max_retries = 5
+        import os
+        if os.environ.get("DACODE_ABLATION_NO_REPAIR") == "1":
+            print("  💰 [Ablation] Restricting max_retries to 1 (No Repair)...")
+            max_retries = 1
+        # TDGM_EVOLUTION_REFLEXION_CAP_V1
+        import os as _tdgm_os
+        _tdgm_retry_cap = int(_tdgm_os.environ.get('TDGM_MAX_REFLEXION_RETRIES', '3'))
+        max_retries = min(max_retries, 1 + max(0, _tdgm_retry_cap))
         print(f"  💰 Budget: {max_retries} retries, temp={budget['temperature']}")
 
         # ═══ Phase 1: Planner (Plan + Explore)  [adapted Proposer role] ═══
-        trajectory.append({"action": "planner_plan"})
-        print(f"  🎯 Planner: Planning... ({len(compact_ctx)} chars)")
-        plan_text, msg_history = self.planner.plan(question, compact_ctx)
+        import os
+        if os.environ.get("DACODE_ABLATION_NO_PLANNER") == "1":
+            print("  🎯 [Ablation] Skipping Planner phase...")
+            plan_text = "ablation"
+            msg_history = []
+        else:
+            trajectory.append({"action": "planner_plan"})
+            print(f"  🎯 Planner: Planning... ({len(compact_ctx)} chars)")
+            plan_text, msg_history = self.planner.plan(question, compact_ctx)
 
-        if not plan_text:
-            trajectory.append({"action": "planner_plan_failed"})
-            print(f"  ⚠️ Planner failed, using fallback")
-            return self._fallback_1shot(task, bb, trajectory, t_start)
+            if not plan_text:
+                trajectory.append({"action": "planner_plan_failed"})
+                print(f"  ⚠️ Planner failed, using fallback")
+                return self._fallback_1shot(task, bb, trajectory, t_start)
 
-        trajectory.append({"action": "planner_explore"})
-        print(f"  🔎 Planner: Exploring data... ({len(detailed_ctx)} chars)")
-        refined_plan, msg_history = self.planner.explore(question, detailed_ctx, msg_history)
+            trajectory.append({"action": "planner_explore"})
+            print(f"  🔎 Planner: Exploring data... ({len(detailed_ctx)} chars)")
+            refined_plan, msg_history = self.planner.explore(question, detailed_ctx, msg_history)
 
         # ═══ Phase 2: Solver (Code Generation) ═══
         trajectory.append({"action": "solver_generate"})
@@ -744,6 +762,10 @@ INSTRUCTIONS:
               f"(solved_by={solved_by}, ncd_epi={ncd_epiplexity:.3f}, rules_extracted={rules_extracted}, "
               f"library={len(self.rule_library.rules)})")
 
+        # Collect token usage
+        token_usage = get_active_task_token_usage().copy()
+        print(f"  💸 Task Token Usage — Prompt: {token_usage['prompt_tokens']} | Completion (Output): {token_usage['completion_tokens']} | Total: {token_usage['total_tokens']}")
+
         result_data = {
             "finished": finished,
             "solved_by": solved_by,
@@ -756,6 +778,7 @@ INSTRUCTIONS:
             "goldilocks": is_in_goldilocks_zone(ncd_epiplexity) if finished else {"goldilocks_status": "N/A"},
             "rules_used": len(self.rule_library.rules),
             "rules_extracted_this_task": rules_extracted,
+            "token_usage": token_usage,  # Store prompt and completion tokens for the task
         }
         self._save_result(task_id, result_data)
 

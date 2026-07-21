@@ -4,8 +4,10 @@ import os
 import re
 
 import anthropic
+import random
 import backoff
 import openai
+import httpx
 
 MAX_OUTPUT_TOKENS = 8192
 AVAILABLE_LLMS = [
@@ -39,7 +41,29 @@ AVAILABLE_LLMS = [
     "deepseek-chat",
     "deepseek-coder",
     "deepseek-reasoner",
+    # Gemini models
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
 ]
+
+
+# Globally tracks token usage for the active task cycle
+ACTIVE_TASK_TOKEN_USAGE = {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+}
+
+def reset_active_task_token_usage():
+    global ACTIVE_TASK_TOKEN_USAGE
+    ACTIVE_TASK_TOKEN_USAGE = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+    }
+
+def get_active_task_token_usage():
+    return ACTIVE_TASK_TOKEN_USAGE
 
 def create_client(model: str):
     """
@@ -75,6 +99,28 @@ def create_client(model: str):
             base_url="https://api.deepseek.com"
         )
         return client, model
+    elif model.startswith("google/") or "gemini" in model:
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        if not api_key and os.environ.get("GEMINI_API_KEYS"):
+            keys = os.environ.get("GEMINI_API_KEYS").split(",")
+            api_key = keys[0].strip()
+            
+        if api_key and api_key.startswith("sk-or-v1-"):
+            base_url = "https://openrouter.ai/api/v1"
+            if not model.startswith("google/"):
+                model = f"google/{model}"
+            print(f"Using OpenRouter API with model {model}.")
+        else:
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+            if model.startswith("google/"):
+                model = model.replace("google/", "")
+            print(f"Using Google Gemini OpenAI compatibility API with model {model}.")
+            
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
+        return client, model
     elif model == "llama3.1-405b":
         print(f"Using OpenAI API with {model}.")
         client = openai.OpenAI(
@@ -98,7 +144,7 @@ def create_client(model: str):
         print(f"Using hosted_vllm proxy ({base_url}) with model {model}.")
         # Per-call timeout + single retry: without this a hung proxy connection blocks for the
         # SDK default 600s, and an unbounded outer backoff can stall a task for hours.
-        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=120.0, max_retries=1)
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=120.0, max_retries=1, default_headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
         return client, model  # pass full model name as-is to proxy
     else:
         raise ValueError(f"Model {model} not supported.")
@@ -106,7 +152,7 @@ def create_client(model: str):
 # Get N responses from a single message, used for ensembling.
 @backoff.on_exception(backoff.expo,
                       (openai.RateLimitError, openai.APITimeoutError, openai.InternalServerError,
-                       openai.APIConnectionError, openai.APIError),
+                       openai.APIConnectionError, openai.APIError, httpx.HTTPError),
                       max_time=120)
 def get_batch_responses_from_llm(
         msg,
@@ -137,7 +183,7 @@ def get_batch_responses_from_llm(
             max_tokens=MAX_OUTPUT_TOKENS,
             n=n_responses,
             stop=None,
-            seed=0,
+            seed=random.randint(0, 1000000),
         )
         content = [r.message.content for r in response.choices]
         new_msg_history = [
@@ -190,7 +236,7 @@ def get_batch_responses_from_llm(
     backoff.expo,
     (openai.RateLimitError, openai.APITimeoutError, openai.InternalServerError,
      openai.APIConnectionError, openai.APIError,
-     anthropic.RateLimitError, anthropic.APIStatusError),
+     anthropic.RateLimitError, anthropic.APIStatusError, httpx.HTTPError),
     max_time=120,
 )
 def get_response_from_llm(
@@ -248,7 +294,7 @@ def get_response_from_llm(
             max_tokens=MAX_OUTPUT_TOKENS,
             n=1,
             stop=None,
-            seed=0,
+            seed=random.randint(0, 1000000),
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
@@ -264,7 +310,7 @@ def get_response_from_llm(
             # max_completion_tokens=MAX_OUTPUT_TOKENS,
             n=1,
             # stop=None,
-            seed=0,
+            seed=random.randint(0, 1000000),
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
@@ -326,6 +372,7 @@ def get_response_from_llm(
         # NOTE: the earlier 0.2529 / K-sweep runs used thinking OFF because the 4096 cap left no
         # room for thinking -> truncation -> 0% finished. Results under thinking-OFF and
         # thinking-ON are therefore NOT directly comparable.
+        is_gemini = "gemini" in model.lower() or model.startswith("google/")
         create_kwargs = dict(
             model=model,
             messages=[
@@ -335,16 +382,32 @@ def get_response_from_llm(
             temperature=temperature,
             max_tokens=MAX_OUTPUT_TOKENS,
             n=1,
-            stream=True,
+            stream=False,
         )
+        if "gemini" not in model:
+            create_kwargs["seed"] = random.randint(0, 1000000)
         if any(tag in model for tag in ("Qwen3", "3.5", "A3B")):
             create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+        
         response = client.chat.completions.create(**create_kwargs)
-        content = ""
-        for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content += chunk.choices[0].delta.content
+        content = response.choices[0].message.content or ""
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    # Print and accumulate token usage if available
+    try:
+        if 'response' in locals() and hasattr(response, 'usage') and response.usage:
+            prompt_t = getattr(response.usage, 'prompt_tokens', 0)
+            completion_t = getattr(response.usage, 'completion_tokens', 0)
+            total_t = getattr(response.usage, 'total_tokens', 0)
+            
+            global ACTIVE_TASK_TOKEN_USAGE
+            ACTIVE_TASK_TOKEN_USAGE["prompt_tokens"] += prompt_t
+            ACTIVE_TASK_TOKEN_USAGE["completion_tokens"] += completion_t
+            ACTIVE_TASK_TOKEN_USAGE["total_tokens"] += total_t
+            
+            print(f"[Usage Stats] Model: {model} | Prompt Tokens: {prompt_t} | Completion (Output) Tokens: {completion_t}")
+    except Exception as e:
+        pass
+
     if print_debug:
         print()
         print("*" * 20 + " LLM START " + "*" * 20)

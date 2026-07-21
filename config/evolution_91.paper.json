@@ -1,0 +1,76 @@
+{
+  "project_root": "/home/khoa/agent_benchmark/data-agent",
+  "output_root": "/home/khoa/agent_benchmark/data-agent/data/evolution_runs/REPLACE_WITH_UNIQUE_RUN_ID",
+  "dev_manifest": "/home/khoa/agent_benchmark/data-agent/data/dacode_evolution_dev_manifest.jsonl",
+  "benchmark_manifest": "/home/khoa/agent_benchmark/data-agent/data/dacode_unified_manifest.jsonl",
+  "data_lake": "/home/khoa/agent_benchmark/data-agent/data/dacode_lake_paper",
+  "frozen_cluster_file": "/home/khoa/agent_benchmark/data-agent/data/frozen_clusters_hierarchical_k26.json",
+  "python": "/home/khoa/agent_benchmark/venv/bin/python",
+  "model": "hosted_vllm/Qwen/Qwen3.5-35B-A3B-FP8",
+  "cycles": 30,
+  "meta_interval": 5,
+  "strategy_timeout_seconds": 3.0,
+  "candidate_timeout_seconds": 7200,
+  "outer_timeout_seconds": 86400,
+  "stage1_tasks": 10,
+  "stage2_tasks": 50,
+  "stage1_gate": 0.4,
+  "pass_threshold": 0.999999,
+  "epiplexity_min": 0.5,
+  "epiplexity_max": 2.2,
+  "budgets": {
+    "low": {"candidates": 1, "retries": 1},
+    "medium": {"candidates": 3, "retries": 2},
+    "high": {"candidates": 5, "retries": 3}
+  },
+  "mutable_files": [
+    "dgm_agent/dacode_orchestrator.py"
+  ],
+  "frozen_files": [
+    "core/inspector.py",
+    "dgm_agent/blackboard.py",
+    "dgm_agent/dacode_runner.py",
+    "dgm_agent/lambda_eval.py",
+    "dgm_agent/llm.py",
+    "eval_official.py",
+    "eval_discovery_f1.py",
+    "scripts/download_benchmarks.py",
+    "plot_results.py",
+    "data/dacode_unified_manifest.jsonl",
+    "data/frozen_clusters_hierarchical_k26.json",
+    "data/dacode_lake_paper"
+  ],
+  "copy_paths": [
+    "dgm_agent",
+    "core",
+    "LAMBDA.py",
+    "config.yaml"
+  ],
+  "runner_command": [
+    "{python}", "-u", "-m", "dgm_agent.dacode_runner",
+    "--manifest", "{manifest}",
+    "--sandbox_dir", "{sandbox}"
+  ],
+  "official_eval_command": [
+    "{python}", "eval_official.py",
+    "--sandbox_dir", "{sandbox}",
+    "--results_file", "{results}"
+  ],
+  "discovery_eval_command": [
+    "{python}", "eval_discovery_f1.py",
+    "--sandbox_dir", "{sandbox}",
+    "--results_file", "{discovery_results}"
+  ],
+  "benchmark_env": {
+    "DACODE_CLUSTERING_METHOD": "llm_hierarchical",
+    "DACODE_LLM_CLUSTERING_MODEL": "deepseek-chat",
+    "DACODE_LLM_CLUSTERING_K": "26",
+    "TDGM_FROZEN_CLUSTER_FILE": "/home/khoa/agent_benchmark/data-agent/data/frozen_clusters_hierarchical_k26.json"
+  },
+  "required_env": [
+    "QWEN_API_KEY"
+  ],
+  "seed": 20260720,
+  "max_mutable_file_bytes": 160000,
+  "max_rules_in_prompt": 8
+}

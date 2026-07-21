@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(override=True)
+    load_dotenv(override=False)
 except ImportError:
     dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     if os.path.exists(dotenv_path):
@@ -343,6 +343,391 @@ def build_file_agents(data_lake_dir: str, max_files_per_cluster: int = 8, use_se
     if not all_files:
         print(f"  ⚠️ Không tìm thấy file dữ liệu trong: {data_lake_dir}")
         return []
+
+    # ── Method 0b: Hierarchical LLM-based filename clustering ── #
+    # TDGM_FROZEN_CLUSTER_HOOK_V1
+    _tdgm_frozen_clusters = os.environ.get('TDGM_FROZEN_CLUSTER_FILE', '')
+    if _tdgm_frozen_clusters:
+        from dgm_agent.evolution.frozen_clustering import load_frozen_clusters
+        _tdgm_materialized = load_frozen_clusters(
+            Path(_tdgm_frozen_clusters), data_root, expected_k=26
+        )
+        agents = [
+            FileAgent(agent_id=f'file_agent_{idx:02d}', cluster_name=item['name'], file_paths=item['file_paths'])
+            for idx, item in enumerate(_tdgm_materialized)
+        ]
+        print(f'  Frozen Hierarchical Clustering: {len(agents)} clusters')
+        return agents
+
+    clustering_method = os.environ.get("DACODE_CLUSTERING_METHOD", "kmeans").lower()
+    if clustering_method == "llm_hierarchical":
+        try:
+            from llm import create_client, get_response_from_llm, extract_json_between_markers
+            
+            llm_model = os.environ.get("DACODE_LLM_CLUSTERING_MODEL", "deepseek-chat")
+            print(f"  🌐 Using Hierarchical LLM-based filename clustering with model: {llm_model}...")
+            
+            # Read K cluster limit for LLM-based clustering
+            K_LIMIT = os.environ.get("DACODE_LLM_CLUSTERING_K", "26")
+            if K_LIMIT.lower() == "auto":
+                K_VAL = None
+                print(f"  🎯 Target count: AUTOMATIC (Natural) clusters for {len(all_files)} files...")
+            else:
+                K_VAL = int(K_LIMIT) if K_LIMIT.isdigit() else 26
+                K_VAL = max(1, min(K_VAL, len(all_files)))
+                print(f"  🎯 Target count: K={K_VAL} clusters for {len(all_files)} files...")
+            
+            # Helper to form file addresses input list
+            def get_rel_paths(files_list):
+                res = []
+                for fpath in files_list:
+                    rel = str(Path(fpath).relative_to(data_root))
+                    res.append(rel)
+                return res
+            
+            # Helper function for calling Vertex AI
+            def call_llm_for_clustering(prompt: str, system_instruction: str = None) -> str:
+                if llm_model == "google/gemini-2.5-pro":
+                    import google.auth
+                    from google.auth.transport.requests import Request
+                    import requests
+                    
+                    credentials, project_id = google.auth.default(
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    )
+                    credentials.refresh(Request())
+                    proj = project_id or "gen-lang-client-0072409547"
+                    url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{proj}/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent"
+                    
+                    headers = {
+                        "Authorization": f"Bearer {credentials.token}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "contents": [{
+                            "role": "user",
+                            "parts": [{"text": prompt}]
+                        }],
+                        "generationConfig": {
+                            "temperature": 0.1,
+                            "maxOutputTokens": 8192,
+                            "thinkingConfig": {
+                                "thinkingBudget": 1024
+                            }
+                        }
+                    }
+                    if system_instruction:
+                        payload["systemInstruction"] = {
+                            "parts": [{"text": system_instruction}]
+                        }
+                    
+                    response = requests.post(url, headers=headers, json=payload, timeout=120)
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        return res_json["candidates"][0]["content"]["parts"][0]["text"]
+                    else:
+                        raise ValueError(f"Vertex API returned status code {response.status_code}: {response.text}")
+                else:
+                    client, client_model = create_client(llm_model)
+                    response_text, _ = get_response_from_llm(
+                        msg=prompt,
+                        client=client,
+                        model=client_model,
+                        system_message=system_instruction or "You are a helpful assistant.",
+                        temperature=0.0
+                    )
+                    return response_text
+
+            # --- CACHING SETUP ---
+            import hashlib
+            all_files_sorted = sorted(all_files)
+            hash_input = f"{llm_model}_{clustering_method}_{len(all_files_sorted)}_{''.join(all_files_sorted)}_K_{K_LIMIT}"
+            config_hash = hashlib.md5(hash_input.encode('utf-8')).hexdigest()
+            
+            cache_dir = Path(data_root).parent / "cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path = cache_dir / f"llm_clusters_{config_hash}.json"
+            
+            final_clusters = defaultdict(list)
+            
+            if cache_path.exists():
+                print(f"  ♻️ Found cached Hierarchical LLM clustering results at {cache_path}. Loading...")
+                with open(cache_path, "r", encoding="utf-8") as fcache:
+                    cached_data = json.load(fcache)
+                for cname, rel_paths in cached_data.items():
+                    for rp in rel_paths:
+                        final_clusters[cname].append(str(Path(data_root) / rp))
+                print(f"  ✅ Loaded {len(final_clusters)} clusters from cache.")
+            else:
+                # If target K is close to or larger than file count, return single-file clusters
+                if K_VAL is not None and K_VAL >= len(all_files):
+                    final_clusters = {f"file_cluster_{idx:02d}": [f] for idx, f in enumerate(all_files)}
+                else:
+                    # --- STAGE 1: High-level category clustering ---
+                    rel_all_files = get_rel_paths(all_files)
+                    stage1_prompt = f"""You are an expert in classifying files and directories. You are given a list of file addresses.
+Your task is to classify them into a set of 4 to 8 major, high-level clusters based on their names and directories.
+Group similar files together (e.g., files belonging to the same category, topic, or sub-project).
+
+# Your input:
+    - file addresses: a list of file addresses and names.
+
+# Your output:
+You should generate a valid json object in ```json ``` block with the following structure:
+    - "clusters": a list of valid json objects each containing:
+        - "name": the name of the cluster
+        - "files": a list of file addresses and names that belong to this cluster.
+        - "description": a short description of the cluster
+
+# file addresses:
+{json.dumps(rel_all_files, indent=2)}"""
+                    
+                    print("  🌐 Calling Stage 1 high-level category clustering...")
+                    response1 = call_llm_for_clustering(
+                        prompt=stage1_prompt,
+                        system_instruction="You are an expert in classifying files into related categories."
+                    )
+                    
+                    parsed1 = extract_json_between_markers(response1)
+                    if not parsed1 or not isinstance(parsed1, dict) or "clusters" not in parsed1:
+                        raise ValueError(f"Stage 1 failed to parse valid JSON with 'clusters' key. Response preview: {response1[:300]}")
+                    
+                    clusters_list1 = parsed1["clusters"]
+                    if not isinstance(clusters_list1, list):
+                        raise ValueError("Stage 1 'clusters' is not a list in the parsed JSON.")
+                    
+                    # Map LLM output files back to absolute paths
+                    stage1_clusters = defaultdict(list)
+                    assigned_files = set()
+                    cluster_descriptions = {}
+                    
+                    for idx, c_obj in enumerate(clusters_list1):
+                        if not isinstance(c_obj, dict):
+                            continue
+                        cluster_name = c_obj.get("name", f"category_{idx:02d}")
+                        cluster_name = re.sub(r'[\\s/\\\\:]+', '_', cluster_name.strip())
+                        if not cluster_name:
+                            cluster_name = f"category_{idx:02d}"
+                            
+                        cluster_descriptions[cluster_name] = c_obj.get("description", "")
+                        files_in_c = c_obj.get("files", [])
+                        if not isinstance(files_in_c, list):
+                            continue
+                            
+                        for f_entry in files_in_c:
+                            if not isinstance(f_entry, str):
+                                continue
+                            f_entry = f_entry.strip()
+                            if not f_entry:
+                                continue
+                                
+                            matched = False
+                            # Exact match
+                            for fpath in all_files:
+                                rel = str(Path(fpath).relative_to(data_root))
+                                if f_entry == rel or Path(f_entry).name == Path(fpath).name:
+                                    stage1_clusters[cluster_name].append(fpath)
+                                    assigned_files.add(fpath)
+                                    matched = True
+                                    break
+                            if matched:
+                                continue
+                            # Substring match
+                            for fpath in all_files:
+                                rel = str(Path(fpath).relative_to(data_root))
+                                if f_entry in rel or rel in f_entry:
+                                    stage1_clusters[cluster_name].append(fpath)
+                                    assigned_files.add(fpath)
+                                    matched = True
+                                    break
+                                    
+                    unassigned_files = [f for f in all_files if f not in assigned_files]
+                    if unassigned_files:
+                        print(f"  ⚠️ Stage 1: LLM omitted {len(unassigned_files)} files. Adding to 'misc' category...")
+                        stage1_clusters["misc"].extend(unassigned_files)
+                        cluster_descriptions["misc"] = "Miscellaneous unassigned files"
+                    
+                    # Filter out empty categories
+                    active_categories = {k: v for k, v in stage1_clusters.items() if v}
+                    num_cats = len(active_categories)
+                    print(f"  Stage 1 completed: formed {num_cats} major categories.")
+                    
+                    # --- ALLOCATION STAGE ---
+                    if K_VAL is not None:
+                        allocations = {cat: 1 for cat in active_categories.keys()}
+                        if num_cats >= K_VAL:
+                            pass
+                        else:
+                            # Greedily allocate remaining sub-cluster slots
+                            while sum(allocations.values()) < K_VAL:
+                                best_cat = None
+                                best_ratio = -1.0
+                                for cat, files in active_categories.items():
+                                    sub_k = allocations[cat]
+                                    if sub_k < len(files):
+                                        ratio = len(files) / sub_k
+                                        if ratio > best_ratio:
+                                            best_ratio = ratio
+                                            best_cat = cat
+                                if best_cat is None:
+                                    break
+                                allocations[best_cat] += 1
+                        print(f"  Target sub-cluster allocations: {allocations}")
+                    else:
+                        allocations = None
+
+                    # --- STAGE 2: Semantic Sub-clustering ---
+                    for cat, files in active_categories.items():
+                        if K_VAL is not None:
+                            sub_k = allocations[cat]
+                            if sub_k == 1 or len(files) <= 1:
+                                final_clusters[cat] = files
+                                continue
+                            
+                            rel_files = get_rel_paths(files)
+                            desc = cluster_descriptions.get(cat, "")
+                            stage2_prompt = f"""You are an expert in classifying files.
+We have a group of files belonging to the category '{cat}' (description: {desc}).
+Your task is to subdivide this category into exactly {sub_k} sub-clusters based on their names. Do not create more or fewer than {sub_k} sub-clusters.
+
+# Your input files:
+{json.dumps(rel_files, indent=2)}
+
+# Your output:
+You should generate a valid json object in ```json ``` block with the following structure:
+    - "clusters": a list of valid json objects each containing:
+        - "name": the name of the sub-cluster
+        - "files": a list of file addresses that belong to this sub-cluster.
+
+Each input file MUST be assigned to exactly one of the {sub_k} sub-clusters. Do not leave any file out. All files in the input list must appear in the files list of the clusters."""
+                        else:
+                            # Automatic natural subdivision
+                            if len(files) <= 2:
+                                final_clusters[cat] = files
+                                continue
+                            rel_files = get_rel_paths(files)
+                            desc = cluster_descriptions.get(cat, "")
+                            stage2_prompt = f"""You are an expert in classifying files.
+We have a group of files belonging to the category '{cat}' (description: {desc}).
+Your task is to subdivide this category into related sub-clusters based on their names. Decide the number of sub-clusters naturally based on the files.
+
+# Your input files:
+{json.dumps(rel_files, indent=2)}
+
+# Your output:
+You should generate a valid json object in ```json ``` block with the following structure:
+    - "clusters": a list of valid json objects each containing:
+        - "name": the name of the sub-cluster
+        - "files": a list of file addresses that belong to this sub-cluster.
+
+Each input file MUST be assigned to exactly one of the sub-clusters. Do not leave any file out. All files in the input list must appear in the files list of the clusters."""
+
+                        try:
+                            if K_VAL is not None:
+                                print(f"  🌐 Calling Stage 2 sub-clustering for category '{cat}' (K={sub_k})...")
+                            else:
+                                print(f"  🌐 Calling Stage 2 natural sub-clustering for category '{cat}'...")
+                            response2 = call_llm_for_clustering(
+                                prompt=stage2_prompt,
+                                system_instruction="You are an expert in subdividing files into sub-categories."
+                            )
+                            parsed2 = extract_json_between_markers(response2)
+                            if not parsed2 or not isinstance(parsed2, dict) or "clusters" not in parsed2:
+                                raise ValueError(f"Failed to parse valid JSON for sub-clustering. Response preview: {response2[:200]}")
+                            
+                            sub_clusters_list = parsed2["clusters"]
+                            if not isinstance(sub_clusters_list, list):
+                                raise ValueError("'clusters' key is not a list in sub-clustering parsed JSON.")
+                                
+                            sub_assigned = set()
+                            for sub_idx, sub_obj in enumerate(sub_clusters_list):
+                                if not isinstance(sub_obj, dict):
+                                    continue
+                                sub_name = sub_obj.get("name", f"sub_{sub_idx:02d}")
+                                sub_name = re.sub(r'[\\s/\\\\:]+', '_', sub_name.strip())
+                                if not sub_name:
+                                    sub_name = f"sub_{sub_idx:02d}"
+                                full_sub_name = f"{cat}_{sub_name}"
+                                
+                                sub_files_in = sub_obj.get("files", [])
+                                if not isinstance(sub_files_in, list):
+                                    continue
+                                    
+                                for f_entry in sub_files_in:
+                                    if not isinstance(f_entry, str):
+                                        continue
+                                    f_entry = f_entry.strip()
+                                    for fpath in files:
+                                        rel = str(Path(fpath).relative_to(data_root))
+                                        if f_entry == rel or Path(f_entry).name == Path(fpath).name:
+                                            if full_sub_name not in final_clusters:
+                                                final_clusters[full_sub_name] = []
+                                            final_clusters[full_sub_name].append(fpath)
+                                            sub_assigned.add(fpath)
+                                            break
+                                            
+                            sub_unassigned = [f for f in files if f not in sub_assigned]
+                            if sub_unassigned:
+                                first_sub = next((k for k in final_clusters.keys() if k.startswith(f"{cat}_")), None)
+                                if first_sub:
+                                    final_clusters[first_sub].extend(sub_unassigned)
+                                else:
+                                    final_clusters[f"{cat}_sub_misc"] = sub_unassigned
+                                    
+                        except Exception as sub_e:
+                            print(f"  ⚠️ Sub-clustering category '{cat}' failed: {sub_e}. Applying mechanical fallback split...")
+                            chunk_size = (len(files) + sub_k - 1) // sub_k
+                            for s_idx in range(sub_k):
+                                sub_files = files[s_idx * chunk_size : (s_idx + 1) * chunk_size]
+                                if sub_files:
+                                    final_clusters[f"{cat}_sub_{s_idx:02d}"] = sub_files
+                                    
+                    # --- POST-PROCESSING SAFETY NET ---
+                    for k in list(final_clusters.keys()):
+                        if not final_clusters[k]:
+                            del final_clusters[k]
+                            
+                    if K_VAL is not None:
+                        while len(final_clusters) > K_VAL:
+                            sorted_keys = sorted(final_clusters.keys(), key=lambda k: len(final_clusters[k]))
+                            key_from = sorted_keys[0]
+                            key_to = sorted_keys[1]
+                            final_clusters[key_to].extend(final_clusters[key_from])
+                            del final_clusters[key_from]
+                            
+                        while len(final_clusters) < K_VAL:
+                            sorted_keys = sorted(final_clusters.keys(), key=lambda k: len(final_clusters[k]), reverse=True)
+                            largest_key = sorted_keys[0]
+                            largest_files = final_clusters[largest_key]
+                            if len(largest_files) <= 1:
+                                break
+                            mid = len(largest_files) // 2
+                            final_clusters[largest_key] = largest_files[:mid]
+                            new_key = f"{largest_key}_split_{len(final_clusters)}"
+                            final_clusters[new_key] = largest_files[mid:]
+
+                    # --- CACHE SAVING ---
+                    cached_data = {}
+                    for cname, files in final_clusters.items():
+                        cached_data[cname] = [str(Path(f).relative_to(data_root)) for f in files]
+                    with open(cache_path, "w", encoding="utf-8") as fcache:
+                        json.dump(cached_data, fcache, indent=2, ensure_ascii=False)
+                    print(f"  💾 Saved hierarchical clustering results cache to: {cache_path}")
+                    
+            agents = []
+            for idx, (cluster_name, files) in enumerate(final_clusters.items()):
+                if not files:
+                    continue
+                agents.append(FileAgent(
+                    agent_id=f"file_agent_{idx:02d}",
+                    cluster_name=cluster_name,
+                    file_paths=files,
+                ))
+            print(f"  ✅ Hierarchical LLM Clustering: {len(agents)} clusters for {len(all_files)} files")
+            return agents
+            
+        except Exception as e:
+            print(f"  ❌ Hierarchical LLM Clustering failed: {e}. Falling back to KMeans...")
 
     # ── Method 1: E5-Large + KMeans semantic clustering ── #
     if use_semantic:

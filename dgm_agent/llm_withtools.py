@@ -4,6 +4,7 @@ import re
 import anthropic
 import backoff
 import openai
+import httpx
 import copy
 
 from llm import create_client, get_response_from_llm
@@ -26,7 +27,7 @@ def process_tool_call(tools_dict, tool_name, tool_input):
 
 @backoff.on_exception(
     backoff.expo,
-    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError),
+    (openai.RateLimitError, openai.APITimeoutError, anthropic.RateLimitError, anthropic.APIStatusError, httpx.HTTPError),
     max_time=600,
     max_value=60,
 )
