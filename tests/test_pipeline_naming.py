@@ -60,6 +60,34 @@ def test_the_telco_fallback_string_is_gone_on_a_generic_dataset():
         assert "Khách hàng ổn định" not in name
 
 
+def _with_an_average_cluster(n=300):
+    """Three groups spaced evenly, so the middle one sits ON the overall mean.
+
+    `_retail` above separates every group on some axis, which is why it never exercised
+    this path. Here the middle cluster deviates on nothing, so `name_by_top_feature`
+    returns None for it.
+    """
+    rng = np.random.default_rng(0)
+    g = np.repeat([0, 1, 2], n // 3)
+    return pd.DataFrame({
+        "spend": rng.normal(10, 1, n) + g * 20,
+        "visits": rng.normal(5, 1, n) + g * 9,
+    })
+
+
+def test_a_cluster_near_the_overall_mean_still_gets_a_dataset_neutral_name():
+    """The hole in the 2026-07-27 naming fix.
+
+    `name_by_top_feature` returns None when nothing deviates enough, documented as "the
+    caller keeps whatever it already had". On the GENERIC path what it already had is the
+    rule engine's telco fallback, so the average cluster — the one present in almost every
+    dataset — kept saying "Khách hàng ổn định" on data with no customers in it.
+    """
+    names = _names(_with_an_average_cluster())
+    for name in names:
+        assert "khách hàng" not in name.lower(), f"telco vocabulary on generic data: {names}"
+
+
 def test_names_reference_the_features_that_separate_the_groups():
     """A name must be traceable to a measured deviation, not decorative."""
     joined = " ".join(_names()).lower()

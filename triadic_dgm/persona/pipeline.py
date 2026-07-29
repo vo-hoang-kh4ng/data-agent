@@ -54,6 +54,10 @@ _STAGE2_TRIGGER = 0.5
 #: real failure mode.
 _MAX_ZERO_FRACTION = 0.99
 
+#: Name for a GENERIC cluster that deviates on nothing. States what was measured and
+#: assumes nothing about what the dataset describes.
+_NEAR_MEAN_NAME = "Nhóm gần trung bình toàn tập"
+
 
 def _sample_persona_text(name: str, means: dict, global_mean: dict, top_n: int = 3) -> str:
     """One Vietnamese sentence describing a cluster's standout features.
@@ -450,11 +454,18 @@ def run_persona_pipeline(
     if mode == "GENERIC":
         generic_names = name_by_top_feature(personas, global_mean)
         for p, new_name in zip(personas, generic_names):
-            if new_name and not p["is_anomaly"]:
-                p["persona_name"] = new_name
-                p["sample_persona_text"] = _sample_persona_text(
-                    new_name, p["feature_means"], global_mean
-                )
+            if p["is_anomaly"]:
+                continue
+            # `name_by_top_feature` returns None when nothing deviates enough to name the
+            # cluster after, documented as "the caller keeps whatever it already had". Here
+            # that would be the rule engine's telco fallback, so the average cluster — the
+            # one present in nearly every dataset — came out as "Khách hàng ổn định" on data
+            # with no customers in it. Name it after what was actually measured instead.
+            chosen = new_name or _NEAR_MEAN_NAME
+            p["persona_name"] = chosen
+            p["sample_persona_text"] = _sample_persona_text(
+                chosen, p["feature_means"], global_mean
+            )
         deduped = _dedupe_names({p["cluster_id"]: p["persona_name"] for p in personas})
         for p in personas:
             p["persona_name"] = deduped[p["cluster_id"]]
