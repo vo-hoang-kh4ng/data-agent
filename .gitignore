@@ -115,6 +115,11 @@ workspace/
 data_*.csv
 !data_demo_golden.csv
 data_processed_t4_metadata.json
+# Từ điển cột do scripts/build_column_metadata.py sinh ra. Gắn với một file CSV cụ thể
+# (bản thân file CSV cũng không được commit), và chứa mô tả đang chờ nghiệp vụ xác nhận —
+# commit vào repo sẽ biến bản nháp thành thứ trông như đã chốt.
+*_metadata.json
+*_metadata_review.csv
 # temp reports
 bao-cao-*.html
 pipeline_flow.html
