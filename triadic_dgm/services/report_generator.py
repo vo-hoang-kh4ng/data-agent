@@ -24,7 +24,7 @@ ROADMAP_METADATA = {
     # không tìm thấy và Owner/Timeline/KPI sẽ hiện "TBD" dù recommended_actions vẫn có dữ liệu thật
     # (đã xảy ra trên báo cáo thật với 2 key bên dưới trước khi sửa).
     "Thu thập thêm dữ liệu hành vi (Ticket logs, Call Center logs)": {
-        "objective": "Khám phá nguyên nhân gốc rễ (Root Cause)",
+        "objective": "Bổ sung dữ liệu ngoài phạm vi hành vi hiện có",
         "kpi": "Behavior Coverage, Model Accuracy",
         "investigation": "Pull CRM History, Enrich Telemetry Data",
         "owner": "Data Team",
@@ -44,7 +44,7 @@ ROADMAP_METADATA = {
         "owner": "CX Team",
         "timeline": "7 days"
     },
-    "Phân tích nguyên nhân khiếu nại/liên hệ": {
+    "Phân tích đặc điểm khiếu nại/liên hệ": {
         "objective": "Giảm tỷ lệ khiếu nại lặp lại",
         "kpi": "Repeat Incident Rate, MTTR",
         "investigation": "Check Ticket Categories, Trace Root Cause",
@@ -59,7 +59,7 @@ ROADMAP_METADATA = {
         "timeline": "14 days"
     },
     "Thực hiện khảo sát nguyên nhân rời mạng (Exit Survey)": {
-        "objective": "Hiểu nguyên nhân rời mạng thực tế",
+        "objective": "Ghi nhận nguyên nhân rời mạng trực tiếp từ khách hàng",
         "kpi": "Exit Survey Response Rate, Root Cause Coverage",
         "investigation": "Send Exit Survey, Tag Churn Reason",
         "owner": "CX Team",
@@ -89,7 +89,7 @@ ROADMAP_METADATA = {
         "timeline": "21 days"
     },
     "Khảo sát nguyên nhân rời mạng (Exit Survey) cho nhóm giá trị cao": {
-        "objective": "Hiểu nguyên nhân rời mạng của nhóm giá trị cao dù không có tín hiệu bất mãn",
+        "objective": "Ghi nhận nguyên nhân rời mạng trực tiếp từ khách hàng",
         "kpi": "Exit Survey Response Rate (High-Value), Root Cause Coverage",
         "investigation": "Send Targeted Exit Survey, Tag Non-Service Churn Reason",
         "owner": "CX Team",
@@ -160,7 +160,7 @@ ROADMAP_METADATA = {
         "owner": "Retention Team",
         "timeline": "10 days"
     },
-    "Phân tích nguyên nhân sử dụng dao động": {
+    "Phân tích đặc điểm sử dụng dao động": {
         "objective": "Ổn định hành vi sử dụng, giảm rủi ro rời mạng do thiếu nhất quán",
         "kpi": "Usage Stability Index, Churn Rate",
         "investigation": "Review Usage Timeline, Segment by Package Change",
@@ -215,7 +215,7 @@ ROADMAP_KEYWORD_FALLBACKS = [
         "objective": "Thu hồi khách hàng có giá trị tiềm năng đã rời mạng", "kpi": "Win-back Rate, Reactivation ARPU",
         "investigation": "Score Churned Base by Prior Value", "owner": "Retention Team", "timeline": "30 days"}),
     (["exit survey", "khảo sát nguyên nhân rời mạng"], {
-        "objective": "Hiểu nguyên nhân rời mạng thực tế", "kpi": "Exit Survey Response Rate",
+        "objective": "Ghi nhận nguyên nhân rời mạng trực tiếp từ khách hàng", "kpi": "Exit Survey Response Rate",
         "investigation": "Send Exit Survey, Tag Churn Reason", "owner": "CX Team", "timeline": "14 days"}),
     (["gói cước", "đổi gói"], {
         "objective": "Giữ chân qua điều chỉnh gói cước phù hợp nhu cầu thực tế", "kpi": "Usage Recovery Rate, Churn Rate",
@@ -227,7 +227,7 @@ ROADMAP_KEYWORD_FALLBACKS = [
         "objective": "Ngăn chặn tụt hạng phân khúc / rời mạng", "kpi": "Retention Rate, Downgrade Rate",
         "investigation": "Pull Billing History, Check Tier Change Log", "owner": "Retention Team", "timeline": "10 days"}),
     (["thu thập", "dữ liệu hành vi"], {
-        "objective": "Khám phá nguyên nhân gốc rễ (Root Cause)", "kpi": "Behavior Coverage, Model Accuracy",
+        "objective": "Bổ sung dữ liệu ngoài phạm vi hành vi hiện có", "kpi": "Behavior Coverage, Model Accuracy",
         "investigation": "Pull CRM History, Enrich Telemetry Data", "owner": "Data Team", "timeline": "14 days"}),
 ]
 
@@ -250,7 +250,7 @@ RETENTION_SCRIPT_CATALOG = {
         "script": "Xin lỗi vì trải nghiệm mạng chưa ổn định, xác nhận lại sự cố, cam kết thời gian xử lý, đề xuất kiểm tra đường truyền miễn phí.",
     },
     "PRICE": {
-        "category": "Giá cước cao / Thay đổi hạng phân khúc",
+        "category": "Mức cước cao / Thay đổi hạng phân khúc",
         "script": "Ghi nhận phản hồi về chi phí, giải thích thay đổi hạng phân khúc (nếu có), đề xuất gói/ưu đãi giữ chân phù hợp theo chính sách hiện hành.",
     },
     "EXPERIENCE": {
@@ -434,6 +434,7 @@ _PROFILE_DOMAIN_FALLBACK_KEYWORDS = {
 # dụng; nó KHÔNG có khảo sát rời mạng, lý do huỷ, hay thông tin ưu đãi đối thủ — nên mọi câu
 # nhân quả trước đây đều là khẳng định vượt quá dữ liệu. Nội dung nay chỉ mô tả quan sát.
 _CHURN_DRIVER_NARRATIVE_CLAUSE = {
+    "Sự cố kỹ thuật ở mức cao, các kênh tương tác khác không nổi bật": "có số sự cố kỹ thuật cao hơn hẳn mặt bằng chung trong khi khiếu nại và mức liên hệ CSKH không vượt trội",
     "Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH": "thuộc nhóm chi tiêu cao, mức sử dụng suy giảm rõ rệt, và không ghi nhận liên hệ CSKH nào",
     "Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao": "có tần suất liên hệ CSKH, số khiếu nại và số sự cố kỹ thuật cùng ở mức cao",
     "Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau": "ghi nhận nhiều khiếu nại/sự cố ở giai đoạn đầu kỳ, sau đó giảm mạnh",
@@ -444,6 +445,7 @@ _CHURN_DRIVER_NARRATIVE_CLAUSE = {
     "Không có tín hiệu nổi bật trong hành vi tương tác": "không ghi nhận khiếu nại, sự cố kỹ thuật hay mức liên hệ CSKH nào vượt trội so với mặt bằng chung",
 }
 _CHURN_DRIVER_NARRATIVE_NOUN = {
+    "Sự cố kỹ thuật ở mức cao, các kênh tương tác khác không nổi bật": "mức sự cố kỹ thuật cao",
     "Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH": "mức chi tiêu cao đi cùng sử dụng suy giảm",
     "Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao": "mức liên hệ, khiếu nại và sự cố cùng cao",
     "Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau": "khiếu nại/sự cố tập trung ở giai đoạn đầu kỳ",
@@ -457,6 +459,7 @@ _CHURN_DRIVER_NARRATIVE_NOUN = {
 # một nguyên nhân rời mạng. Nay mỗi dòng chỉ tóm tắt điều đã đo được và, khi cần, nói rõ điều
 # dữ liệu KHÔNG cho biết — hữu ích hơn một suy đoán, vì nó chỉ ra đúng chỗ cần bổ sung dữ liệu.
 _CHURN_DRIVER_BUSINESS_INSIGHT = {
+    "Sự cố kỹ thuật ở mức cao, các kênh tương tác khác không nổi bật": "Sự cố kỹ thuật là chỉ số duy nhất vượt trội ở nhóm này; dữ liệu ghi nhận số lần phát sinh, không ghi nhận kết quả xử lý từng lần.",
     "Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH": "Nhóm chi tiêu cao này có mức sử dụng giảm rõ rệt nhưng không để lại bất kỳ liên hệ CSKH nào, nên dữ liệu hiện có không chứa thông tin về trải nghiệm của họ.",
     "Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao": "Ba chỉ số liên hệ, khiếu nại và sự cố kỹ thuật cùng cao trong một nhóm; dữ liệu ghi nhận số lần phát sinh, không ghi nhận kết quả xử lý từng lần.",
     "Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau": "Phân bố khiếu nại/sự cố lệch hẳn về giai đoạn đầu kỳ quan sát; dữ liệu không cho biết mức giảm về sau là do vấn đề được xử lý hay do khách hàng ngừng phản ánh.",
@@ -478,9 +481,9 @@ _NARRATIVE_NOUN_STRIP_PREFIXES = [
 # persona-cards.tsx hardcode đúng 3 chuỗi này) — chỉ đổi NHÃN HIỂN THỊ trong markdown khi persona có
 # churn_driver (POST_CHURN), để tránh đề xuất "giữ chân" người ĐÃ rời mạng.
 _POST_CHURN_TIER_DISPLAY_LABELS = {
-    "Nhóm rủi ro cao – cần hành động ưu tiên": "Nhóm có dấu hiệu rõ ràng trước khi rời mạng – ưu tiên điều tra nguyên nhân",
+    "Nhóm rủi ro cao – cần hành động ưu tiên": "Nhóm có tín hiệu hành vi rõ ràng trước khi rời mạng",
     "Nhóm bị động – theo dõi & cảnh báo": "Nhóm không có dấu hiệu hành vi rõ ràng trước khi rời mạng",
-    "Nhóm cần giữ chân ngay – ưu tiên giữ chân": "Nhóm giá trị cao đã rời mạng – ưu tiên phân tích nguyên nhân",
+    "Nhóm cần giữ chân ngay – ưu tiên giữ chân": "Nhóm giá trị cao đã rời mạng – ưu tiên rà soát",
 }
 
 # Sentence terminators used to split narrative prose. Kept explicit (not a regex on ".") so a
@@ -648,7 +651,7 @@ class ReportGenerator:
         # POST_CHURN mode: "risk" (future risk) is meaningless for customers who already left —
         # tag reflects whether a churn driver could be identified from the behavioral trajectory.
         if p.get('churn_driver'):
-            return "Root Cause Identified" if p.get('churn_driver_confidence') == 'MEDIUM' else "Unclear Cause"
+            return "Có tín hiệu hành vi" if p.get('churn_driver_confidence') == 'MEDIUM' else "Không có tín hiệu nổi bật"
         if p.get('severity') == 'EXTREME' or p.get('risk') == 'EXTREME':
             return "Very High Risk"
         tier = p.get('risk_tier') or ''
@@ -739,7 +742,7 @@ class ReportGenerator:
                 'noun_phrase': "xu hướng rời mạng trong im lặng",
             }
         return {
-            'name': "Khách hàng rời mạng không rõ nguyên nhân hành vi",
+            'name': "Khách hàng rời mạng không có tín hiệu hành vi nổi bật",
             'clause': "không có dấu hiệu hành vi nổi bật trước khi rời mạng",
             'noun_phrase': "thiếu tín hiệu hành vi rõ ràng",
         }
@@ -782,7 +785,7 @@ class ReportGenerator:
             signal_clause = f"xu hướng {noun} {magnitude}"
         # Nếu KHÔNG elevated: KHÔNG nhét 1 feature lệch âm/trung tính vào câu "xu hướng X cao..."
         # (đọc như đang mô tả nguyên nhân trong khi thực ra không có) — ĐÃ XẢY RA TRÊN BÁO CÁO THẬT
-        # với persona 92.8% "Không rõ nguyên nhân hành vi". signal_clause=None báo hiệu "không có
+        # với persona 92.8% "Không có tín hiệu hành vi nổi bật". signal_clause=None báo hiệu "không có
         # tín hiệu hành vi nổi bật" cho cả 2 phía dùng chung.
 
         svc_comp = (p.get('profile_attributes') or {}).get('service_composition')
@@ -908,7 +911,7 @@ class ReportGenerator:
 
             driver_groups = {}
             for p in personas_data:
-                driver = p.get('churn_driver') or "Không rõ nguyên nhân hành vi"
+                driver = p.get('churn_driver') or "Không có tín hiệu hành vi nổi bật"
                 conf = p.get('churn_driver_confidence', 'LOW')
                 g = driver_groups.setdefault(driver, {'pct': 0.0, 'confidence': conf})
                 g['pct'] += p.get('support_pct', 0) * 100
@@ -921,9 +924,9 @@ class ReportGenerator:
 
             actionable = sum(1 for info in driver_groups.values() if info['confidence'] == 'MEDIUM')
             if actionable > 0:
-                lines.append(f"→ Có ít nhất **{actionable} nguyên nhân** doanh nghiệp có thể chủ động can thiệp.")
+                lines.append(f"→ Có **{actionable} nhóm** mang tín hiệu hành vi rõ ràng, đủ cụ thể để rà soát tiếp.")
             else:
-                lines.append("→ Không có nguyên nhân hành vi rõ ràng để can thiệp trực tiếp — cần xem xét yếu tố ngoài hành vi (giá cước, đối thủ cạnh tranh...).")
+                lines.append("→ Không nhóm nào mang tín hiệu hành vi nổi bật. Dữ liệu hiện có không chứa thông tin giải thích được khác biệt giữa các nhóm; cần bổ sung nguồn dữ liệu ngoài phạm vi hành vi.")
             return " ".join(lines)
 
         # GENERIC: there is no risk/severity concept in the data, so a "X% stable, no high-risk
@@ -1356,7 +1359,17 @@ class ReportGenerator:
             # khớp nhau, không lệch pha).
             if churn_driver and churn_driver not in _CHURN_DRIVER_NARRATIVE_CLAUSE:
                 churn_driver = self._compose_fallback_driver(p)['name']
-            base_names[cid] = churn_driver or self.clean_persona_name(p.get('persona_name', ''))
+            # TÊN CỦA PIPELINE THẮNG. Trước đây dòng này ưu tiên churn_driver và chỉ dùng
+            # persona_name làm phương án cuối. Điều đó hợp lý khi persona_name còn là chuỗi
+            # telco của rule engine, giống hệt nhau ở mọi cụm — nay thì không: pipeline đặt
+            # tên cụm mà thang bậc nhận ra theo driver của nó, và cụm không nhận ra theo độ
+            # lệch đo được của chính nó, vốn đã phân biệt và đã chống trùng.
+            # ĐÃ XẢY RA TRÊN BÁO CÁO THẬT: cùng một JSON, dashboard hiện "Nhóm old_cl cao"
+            # còn báo cáo hiện "Không có tín hiệu nổi bật ... (3)" — người dùng đọc hai nơi
+            # và thấy hai câu chuyện khác nhau. Khi cụm KHÔNG có persona_name (JSON cũ), rơi
+            # về churn_driver như trước.
+            pipeline_name = self.clean_persona_name(p.get('persona_name', ''))
+            base_names[cid] = pipeline_name or churn_driver or ''
 
         groups = {}
         for cid, base in base_names.items():
@@ -1505,7 +1518,7 @@ class ReportGenerator:
         if loyalty_high and (call_high or usage_declining):
             contradictions.append("Loyalty cao NHƯNG mức độ tương tác/sử dụng đang giảm — có thể là dấu hiệu suy giảm âm thầm dù khách hàng vẫn trung thành")
         if value_high and usage_declining and not (complaint_high or technical_high or call_high):
-            contradictions.append("Giá trị cao NHƯNG usage giảm, KHÔNG có complaint/sự cố kỹ thuật đi kèm — nguyên nhân nhiều khả năng KHÔNG phải chất lượng dịch vụ")
+            contradictions.append("Giá trị cao NHƯNG usage giảm, KHÔNG có complaint/sự cố kỹ thuật đi kèm")
         return contradictions
 
     def _build_generic_prompt(self, personas_data: list, global_means: dict) -> str:
@@ -1627,6 +1640,15 @@ Bạn là Consultant tại Deloitte.
 Nhiệm vụ: Viết diễn giải Báo cáo Chân dung Khách hàng bằng NGÔN NGỮ QUẢN TRỊ.
 
 QUY TẮC CỨNG:
+- MÔ TẢ, KHÔNG GIẢI THÍCH (ƯU TIÊN TUYỆT ĐỐI, ghi đè mọi quy tắc khác bên dưới). Tập dữ liệu
+  này gồm những khách hàng ĐÃ rời mạng, và nó chứa số lần liên hệ, cước phí, xu hướng sử
+  dụng — nó KHÔNG chứa khảo sát rời mạng, lý do huỷ, hay thông tin ưu đãi đối thủ. Vì vậy
+  TUYỆT ĐỐI KHÔNG viết bất kỳ câu nào khẳng định hay phỏng đoán VÌ SAO họ rời mạng. Cấm các
+  cụm: "nguyên nhân", "dẫn đến", "khiến khách hàng", "yếu tố góp phần", "do giá cước", "do
+  đối thủ/cạnh tranh", "chủ động rời mạng". Chỉ được viết những gì ĐO ĐƯỢC ("nhóm này có X
+  cao hơn mặt bằng chung Y%"). Khi dữ liệu không nói lên điều gì, hãy nói thẳng là dữ liệu
+  hiện có không cho biết — câu đó hữu ích hơn một suy đoán, vì nó chỉ ra đúng chỗ cần bổ
+  sung dữ liệu.
 - KHÔNG sinh số liệu. KHÔNG nhắc lại số liệu.
 - KHÔNG suy diễn ngoài Business Signals/domain_signals được cấp.
 - KHÔNG đề xuất hành động mới (Action/Investigation).
@@ -1644,12 +1666,12 @@ QUY TẮC CỨNG:
   (vd luôn "Nhóm này có tỷ lệ... mức cước... chủ yếu sử dụng..." — đã bị phát hiện đọc rất máy móc
   trên báo cáo thật khi nhiều persona liên tiếp dùng y hệt cấu trúc này) — mỗi persona PHẢI đọc như
   1 đoạn phân tích RIÊNG, câu chữ/thứ tự khác nhau tuỳ persona, dù vẫn tôn trọng đúng dữ liệu. Ví dụ:
-  churn_story_facts = {{"quy_mo": "Khoảng 1.346 khách hàng (2.5%)", "ly_do_roi_mang": "xuất hiện
+  churn_story_facts = {{"quy_mo": "Khoảng 1.346 khách hàng (2.5%)", "dac_diem_ghi_nhan": "ghi nhận
   nhiều khiếu nại mới trong thời gian gần đây", "thong_tin_gia_tri_hanh_vi_dich_vu": "tỷ lệ khách
   hàng giá trị cao khoảng 42%, mức cước trung bình khoảng 220 nghìn đồng/tháng, chủ yếu sử dụng Net
   Pay (62%)", "tin_hieu_hanh_vi_manh_nhat": "xu hướng phàn nàn cao vượt trội", "ket_luan_goi_y":
-  "Việc gia tăng khiếu nại ngay trước thời điểm rời mạng cho thấy trải nghiệm dịch vụ tiêu cực nhiều
-  khả năng là yếu tố góp phần vào quyết định chấm dứt dịch vụ."}} → "Khoảng 1.346 khách hàng (2.5%)
+  "Khiếu nại tập trung ở giai đoạn cuối kỳ quan sát thay vì phân bố đều, cho thấy một thay đổi
+  trong kỳ chứ không phải nền chung."}} → "Khoảng 1.346 khách hàng (2.5%)
   rời mạng ngay sau một đợt khiếu nại tăng đột biến. Đây là nhóm có giá trị tương đối cao (~42% chi
   tiêu cao, ARPU khoảng 220 nghìn đồng/tháng) và chủ yếu gắn với Net Pay (62%), nhưng mức độ phàn nàn
   lại vượt trội hẳn so với mặt bằng chung. Trải nghiệm dịch vụ tiêu cực nhiều khả năng là yếu tố góp
@@ -1659,8 +1681,7 @@ QUY TẮC CỨNG:
   LIÊN KẾT các domain có stars cao với nhau thành 1 câu chuyện — KHÔNG được chỉ mô tả 1 domain
   riêng lẻ. Ví dụ 1: complaint=5★ + technical=4★ + value=5★ + usage=1★ (thấp) → "Khách hàng giá trị
   cao gặp nhiều sự cố kỹ thuật và phát sinh khiếu nại dồn dập, trong khi hành vi sử dụng chưa suy
-  giảm đáng kể — cho thấy nguyên nhân nhiều khả năng đến từ chất lượng dịch vụ hơn là thay đổi nhu
-  cầu."
+  giảm đáng kể."
 - BẮT BUỘC dùng văn phong TƯƠNG PHẢN (contrastive) khi 1 domain cao đi kèm nhiều domain thấp — đây
   là kiểu câu có giá trị business cao nhất. Ví dụ 2: value=5★, còn complaint/call/missed/technical
   đều thấp (xem `domain_contrast_note` nếu có) → "Mặc dù nhóm này gần như không phát sinh khiếu
@@ -1843,7 +1864,7 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
         the whole report. Empty personas_analysis makes every `if n:` lookup downstream a no-op."""
         return ReportNarrative(
             executive_summary=ExecutiveSummaryNarrative(
-                executive_overview="AI narrative tạm thời không khả dụng do lỗi kết nối dịch vụ LLM. Các số liệu, phân tích nguyên nhân và roadmap bên dưới vẫn được tính toán đầy đủ và chính xác — chỉ thiếu phần diễn giải văn phong bổ sung từ AI."
+                executive_overview="AI narrative tạm thời không khả dụng do lỗi kết nối dịch vụ LLM. Các số liệu, phân tích đặc điểm và roadmap bên dưới vẫn được tính toán đầy đủ và chính xác — chỉ thiếu phần diễn giải văn phong bổ sung từ AI."
             ),
             personas_analysis=[],
             conclusion="Báo cáo được tạo với dữ liệu và phân tích đầy đủ; phần diễn giải mở rộng từ AI tạm thời không khả dụng do lỗi kết nối dịch vụ."
@@ -2078,7 +2099,7 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
             # đoạn văn liền mạch thay vì tách rời nhãn + câu evidence, giữ hedge ("dữ liệu cho thấy")
             # vì đây là tương quan quan sát được, không phải nguyên nhân đã được xác nhận.
             if p.get('churn_driver'):
-                md += "**🔎 Nguyên nhân rời mạng (suy luận từ hành vi):**\n\n"
+                md += "**🔎 Đặc điểm hành vi ghi nhận được:**\n\n"
                 story = self._build_persona_story(p, global_means)
                 md += f"{story or p['churn_driver']}\n\n"
                 trajectory = p.get('temporal_trajectory') or []

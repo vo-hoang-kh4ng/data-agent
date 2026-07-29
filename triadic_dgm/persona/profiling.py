@@ -104,6 +104,16 @@ def compute_profile_global_means(profile_attributes, cluster_sizes):
     return out
 
 
+def _is_absence_flag(column: str) -> bool:
+    """True for a column whose value rises as the thing it names STOPS happening.
+
+    ``no_complaint_all_period``, ``no_cl_all_period``, ``no_fee_all_period`` — each belongs
+    to the domain named after it, yet points the opposite way from every other member.
+    """
+    name = str(column).lower()
+    return name.startswith('no_') or '_no_' in name
+
+
 def compute_domain_signature(df, cluster_col='cluster'):
     groups = DOMAIN_KEYWORD_GROUPS
     if not any(
@@ -156,6 +166,16 @@ def compute_domain_signature(df, cluster_col='cluster'):
                 # trung bình) mới là tín hiệu "đáng lo", độ lệch âm (ít hơn trung bình) là tín hiệu
                 # TỐT/trung tính, không được tính là "nổi bật" cho các domain này.
                 dev = (v - g) / abs(g) if g != 0 else v
+                # ...NHƯNG một số cột trong chính các domain đó mang DẤU NGƯỢC LẠI: chúng đo
+                # sự VẮNG MẶT của tín hiệu. `no_complaint_all_period` nằm trong domain
+                # complaint (keyword 'no_complaint') và `no_cl_all_period` nằm trong domain
+                # technical (keyword 'no_cl'), nhưng giá trị CÀNG CAO nghĩa là càng ÍT khiếu
+                # nại / sự cố. Không đảo dấu thì "chưa từng khiếu nại" được chấm sao y hệt
+                # "khiếu nại liên tục" — ĐÃ XẢY RA TRÊN BÁO CÁO THẬT: nhóm 33,7% có
+                # no_complaint_all_period=1.00 (+144,7%) trong khi complaint_total_6m=0.00
+                # (-100%) lại bị mô tả là "Có lịch sử khiếu nại/phàn nàn đáng kể".
+                if _is_absence_flag(col):
+                    dev = -dev
                 feats.append((col, round(v, 4), round(g, 4), round(dev, 4)))
             feats.sort(key=lambda x: -x[3])
             top2 = [f for f in feats if f[3] > 0][:2]
@@ -179,6 +199,15 @@ def get_temporal_trajectory(grp):
         recent_v = float(pd.to_numeric(grp[recent_col], errors='coerce').fillna(0).mean()) if recent_col else 0.0
         trend_v = float(pd.to_numeric(grp[trend_col], errors='coerce').fillna(0).mean()) if trend_col else 0.0
         if old_v > 0 or recent_v > 0:
+            if trend_col is None:
+                # Không có cột `{root}_trend` thì KHÔNG được mặc định trend_v = 0.0 rồi rơi
+                # vào nhánh 'ổn định' — đó là báo cáo một cột THIẾU thành một phát hiện về sự
+                # ổn định. ĐÃ XẢY RA TRÊN BÁO CÁO THẬT: mọi dòng của mọi persona đều ghi "ổn
+                # định", kể cả 1.581 -> 0.369 (giảm 77%) và 0.170 -> 1.548 (tăng 9 lần), vì
+                # export đó không có complaint_trend/cl_trend. Hai số old/recent in ngay cạnh
+                # nhãn thì luôn có sẵn, nên suy trực tiếp từ chúng.
+                baseline = old_v if old_v > 0 else recent_v
+                trend_v = (recent_v - old_v) / abs(baseline) if baseline else 0.0
             direction = 'giảm mạnh' if trend_v < -0.3 else ('tăng mạnh' if trend_v > 0.3 else 'ổn định')
             trajectory.append({'metric': label, 'old': round(old_v, 3), 'recent': round(recent_v, 3), 'trend': direction})
     return trajectory
@@ -275,6 +304,19 @@ def classify_churn_driver(grp, domain_sig=None):
         return result(
             'Mức sử dụng suy giảm, chi tiêu không cao, không khiếu nại',
             'Hành vi sử dụng dịch vụ suy giảm dần trong kỳ quan sát, trong khi chi tiêu không thuộc nhóm cao và không ghi nhận khiếu nại hay liên hệ CSKH đáng kể.',
+            'MEDIUM')
+
+    # 7. Sự cố kỹ thuật là domain NỔI BẬT NHẤT, đứng một mình. Nấc 2 phía trên đòi kèm
+    # s_call >= 4 và s_complaint >= 3, nên một tập dữ liệu KHÔNG CÓ cột call_* nào thì
+    # s_call kẹt ở 1 và nấc đó không bao giờ khớp được. ĐÃ XẢY RA TRÊN BÁO CÁO THẬT: một
+    # persona 10,0% có old_cl +890,4%, cl_total_4m +890,2%, active_cl_months +888,2% —
+    # technical đủ 5 sao — vẫn rơi xuống nấc cuối và bị mô tả là "không ghi nhận ... sự cố
+    # kỹ thuật nào vượt trội", mâu thuẫn với chính phụ lục của nó. Đặt ở áp chót để không
+    # cướp trường hợp nào của các nấc phía trên.
+    if s_technical >= 4 and s_technical > s_complaint and s_technical > s_call and s_technical > s_missed:
+        return result(
+            'Sự cố kỹ thuật ở mức cao, các kênh tương tác khác không nổi bật',
+            'Số sự cố kỹ thuật cao hơn hẳn mặt bằng chung, trong khi khiếu nại và mức liên hệ CSKH không vượt trội. Dữ liệu ghi nhận số lần phát sinh sự cố, không ghi nhận kết quả xử lý từng lần.',
             'MEDIUM')
 
     return result(
