@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from triadic_dgm.persona.pipeline import run_persona_pipeline
+from triadic_dgm.persona.profiling import NO_STANDOUT_SIGNAL
 
 
 def _retail(n=600):
@@ -109,18 +110,34 @@ def test_a_failed_run_keeps_its_stated_failure_name():
 
 
 def test_the_telco_path_keeps_its_domain_names():
-    """Dual-path guarantee: on data with telco columns the rule-engine names still win."""
-    rng = np.random.default_rng(3)
-    n = 300
-    df = pd.DataFrame({
-        "cl_total_6m": np.concatenate([rng.normal(12, 2, n // 2), rng.normal(1, 0.4, n // 2)]),
-        "complaint_total_6m": np.concatenate([rng.normal(6, 1, n // 2), rng.normal(0.2, 0.1, n // 2)]),
-        "fee_total": rng.normal(500, 50, n),
-        "old_usage": rng.normal(100, 10, n),
-        "recent_usage": rng.normal(80, 10, n),
-    })
-    personas = run_persona_pipeline(df)
-    # Names come from the rule engine / churn-driver ladder, not from raw column names.
-    joined = " ".join(p["persona_name"] for p in personas)
+    """Dual-path guarantee: a cluster the driver ladder recognises keeps its domain wording.
+
+    Narrowed on 2026-07-29, and the old version was passing for the wrong reason. It asserted
+    that no raw column name may appear in ANY telco persona name, using a fixture in which
+    every cluster fell through to the ladder's final rule — so it never once exercised the
+    domain-naming path it claimed to guard, and stayed green only because the fallback string
+    happens to contain no column names.
+
+    The contract that actually matters, and is now tested: when the ladder DOES recognise a
+    cluster, that domain wording wins. Clusters it does not recognise are named from their
+    own measured deviations instead of all sharing one label — see
+    tests/test_post_churn_describes_not_explains.py for why.
+
+    The ladder is exercised at its own level. Driving it through `run_persona_pipeline`
+    means first manufacturing a DataFrame whose domain stars clear the ladder's thresholds,
+    and a fixture that misses them by one star silently tests nothing — which is exactly how
+    the previous version went vacuous without anyone noticing.
+    """
+    from triadic_dgm.persona.profiling import classify_churn_driver
+
+    quiet_high_value = {
+        "value": {"stars": 5}, "complaint": {"stars": 1}, "call": {"stars": 1},
+        "missed": {"stars": 1}, "technical": {"stars": 1}, "usage": {"stars": 1},
+    }
+    result = classify_churn_driver(
+        pd.DataFrame({"fee_total": [1500.0] * 20, "complaint_total_6m": [0.0] * 20}),
+        quiet_high_value,
+    )
+    assert result["churn_driver"] != NO_STANDOUT_SIGNAL, "the ladder no longer recognises this shape"
     for column in ("cl_total_6m", "complaint_total_6m", "fee_total"):
-        assert column not in joined, f"generic column naming leaked into the telco path: {joined}"
+        assert column not in result["churn_driver"]

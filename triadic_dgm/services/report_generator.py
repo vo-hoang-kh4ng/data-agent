@@ -426,40 +426,45 @@ _PROFILE_DOMAIN_FALLBACK_KEYWORDS = {
     'value': ['high_spender', 'fee_total', 'fee_avg', 'loyalty_rank', 'loyalty_point', 'segment_avg'],
 }
 
+# Ba bảng dưới đây khoá theo giá trị `churn_driver` do profiling.py sinh ra. Chúng từng
+# khoá theo bộ tên cũ và mang nội dung SUY LUẬN NHÂN QUẢ ("nguyên nhân nhiều khả năng đến từ
+# giá cước hoặc ưu đãi đối thủ cạnh tranh", "yếu tố góp phần khiến khách hàng quyết định
+# chấm dứt dịch vụ"). Chủ dữ liệu đã nêu rõ về tập KH đã rời mạng: *chỉ nói đặc điểm, không
+# được nói vì sao là nguyên nhân rời*. Dữ liệu có số lần liên hệ, cước phí và xu hướng sử
+# dụng; nó KHÔNG có khảo sát rời mạng, lý do huỷ, hay thông tin ưu đãi đối thủ — nên mọi câu
+# nhân quả trước đây đều là khẳng định vượt quá dữ liệu. Nội dung nay chỉ mô tả quan sát.
 _CHURN_DRIVER_NARRATIVE_CLAUSE = {
-    "Bất mãn kéo dài, không được xử lý": "trải qua một thời gian dài bất mãn mà không được xử lý triệt để",
-    "Sự cố/khiếu nại cấp tính ngay trước khi rời mạng": "xuất hiện nhiều khiếu nại mới trong thời gian gần đây",
-    "Tăng liên hệ CSKH/cuộc gọi nhỡ trước khi rời mạng": "tần suất liên hệ CSKH/cuộc gọi nhỡ tăng cao trước khi rời mạng",
-    "Khách hàng giá trị cao, chủ động rời mạng": "không có dấu hiệu bất mãn nào, dù là nhóm chi tiêu cao — nguyên nhân nhiều khả năng đến từ giá cước hoặc ưu đãi đối thủ cạnh tranh",
-    "Khách hàng âm thầm rời mạng": "hành vi sử dụng dịch vụ suy giảm dần mà không hề khiếu nại hay liên hệ CSKH trước đó",
-    "Khách hàng giá trị cao nhưng trải nghiệm suy giảm": "hành vi sử dụng dịch vụ suy giảm rõ rệt dù là nhóm chi tiêu cao, và KHÔNG hề khiếu nại hay liên hệ CSKH trước đó — dấu hiệu rời mạng trong im lặng ở nhóm giá trị cao",
-    "Khách hàng gặp sự cố kỹ thuật không được xử lý triệt để": "liên hệ CSKH nhiều lần vì sự cố kỹ thuật lặp lại, đi kèm khiếu nại tăng mạnh, cho thấy vấn đề không được xử lý dứt điểm qua các lần liên hệ",
-    "Không rõ nguyên nhân hành vi (có thể do giá cước/cạnh tranh/khác)": "không có dấu hiệu bất thường rõ ràng trong hành vi tương tác — nguyên nhân nhiều khả năng đến từ yếu tố ngoài hành vi (giá cước, cạnh tranh...)",
+    "Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH": "thuộc nhóm chi tiêu cao, mức sử dụng suy giảm rõ rệt, và không ghi nhận liên hệ CSKH nào",
+    "Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao": "có tần suất liên hệ CSKH, số khiếu nại và số sự cố kỹ thuật cùng ở mức cao",
+    "Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau": "ghi nhận nhiều khiếu nại/sự cố ở giai đoạn đầu kỳ, sau đó giảm mạnh",
+    "Khiếu nại/sự cố tăng mạnh ở giai đoạn cuối kỳ": "ghi nhận khiếu nại/sự cố tăng mạnh ở giai đoạn cuối kỳ quan sát",
+    "Liên hệ CSKH/cuộc gọi nhỡ ở mức cao": "có tần suất liên hệ CSKH/cuộc gọi nhỡ cao hơn mặt bằng chung",
+    "Chi tiêu cao, sử dụng ổn định, không khiếu nại": "thuộc nhóm chi tiêu cao, mức sử dụng giữ ổn định, và không ghi nhận khiếu nại nào",
+    "Mức sử dụng suy giảm, chi tiêu không cao, không khiếu nại": "có mức sử dụng suy giảm dần trong khi chi tiêu không thuộc nhóm cao và không ghi nhận khiếu nại",
+    "Không có tín hiệu nổi bật trong hành vi tương tác": "không ghi nhận khiếu nại, sự cố kỹ thuật hay mức liên hệ CSKH nào vượt trội so với mặt bằng chung",
 }
 _CHURN_DRIVER_NARRATIVE_NOUN = {
-    "Bất mãn kéo dài, không được xử lý": "sự bất mãn kéo dài chưa được xử lý",
-    "Sự cố/khiếu nại cấp tính ngay trước khi rời mạng": "sự gia tăng bất mãn",
-    "Tăng liên hệ CSKH/cuộc gọi nhỡ trước khi rời mạng": "tần suất liên hệ CSKH/cuộc gọi nhỡ tăng cao",
-    "Khách hàng giá trị cao, chủ động rời mạng": "yếu tố ngoài trải nghiệm dịch vụ (giá cước, cạnh tranh)",
-    "Khách hàng âm thầm rời mạng": "xu hướng rời mạng trong im lặng, không qua kênh CSKH",
-    "Khách hàng giá trị cao nhưng trải nghiệm suy giảm": "xu hướng rời mạng trong im lặng ở nhóm giá trị cao",
-    "Khách hàng gặp sự cố kỹ thuật không được xử lý triệt để": "sự cố kỹ thuật lặp lại không được xử lý dứt điểm",
-    "Không rõ nguyên nhân hành vi (có thể do giá cước/cạnh tranh/khác)": "yếu tố ngoài hành vi tương tác",
+    "Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH": "mức chi tiêu cao đi cùng sử dụng suy giảm",
+    "Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao": "mức liên hệ, khiếu nại và sự cố cùng cao",
+    "Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau": "khiếu nại/sự cố tập trung ở giai đoạn đầu kỳ",
+    "Khiếu nại/sự cố tăng mạnh ở giai đoạn cuối kỳ": "khiếu nại/sự cố tăng ở giai đoạn cuối kỳ",
+    "Liên hệ CSKH/cuộc gọi nhỡ ở mức cao": "tần suất liên hệ CSKH/cuộc gọi nhỡ cao",
+    "Chi tiêu cao, sử dụng ổn định, không khiếu nại": "mức chi tiêu cao đi cùng hành vi ổn định",
+    "Mức sử dụng suy giảm, chi tiêu không cao, không khiếu nại": "mức sử dụng suy giảm không kèm phản hồi",
+    "Không có tín hiệu nổi bật trong hành vi tương tác": "sự vắng mặt của tín hiệu tương tác nổi bật",
 }
-# Câu kết insight RIÊNG cho từng driver đã biết — thay cho câu chung chung "Dữ liệu cho thấy X là dấu
-# hiệu nổi bật trước khi chấm dứt dịch vụ" lặp lại y hệt cấu trúc ở MỌI persona (đọc nhàm, không có
-# ý nghĩa nghiệp vụ cụ thể). Luôn HEDGE ("nhiều khả năng", "phản ánh", "cho thấy") — đây là tương quan
-# quan sát được trên tập KHÁCH HÀNG ĐÃ RỜI MẠNG, không phải nguyên nhân đã được xác nhận tuyệt đối,
-# TUYỆT ĐỐI KHÔNG khẳng định thẳng kiểu "chất lượng dịch vụ đang ảnh hưởng...".
+# Câu kết cho từng nhóm. Trước đây bảng này tên là _BUSINESS_INSIGHT và mỗi dòng đều quy kết
+# một nguyên nhân rời mạng. Nay mỗi dòng chỉ tóm tắt điều đã đo được và, khi cần, nói rõ điều
+# dữ liệu KHÔNG cho biết — hữu ích hơn một suy đoán, vì nó chỉ ra đúng chỗ cần bổ sung dữ liệu.
 _CHURN_DRIVER_BUSINESS_INSIGHT = {
-    "Bất mãn kéo dài, không được xử lý": "Việc bất mãn kéo dài không được xử lý dứt điểm nhiều khả năng là yếu tố góp phần khiến khách hàng quyết định chấm dứt dịch vụ.",
-    "Sự cố/khiếu nại cấp tính ngay trước khi rời mạng": "Việc gia tăng khiếu nại ngay trước thời điểm rời mạng cho thấy trải nghiệm dịch vụ tiêu cực nhiều khả năng là yếu tố góp phần vào quyết định chấm dứt dịch vụ.",
-    "Tăng liên hệ CSKH/cuộc gọi nhỡ trước khi rời mạng": "Điều này phản ánh khách hàng có nhu cầu hỗ trợ cao hoặc gặp vướng mắc trong quá trình sử dụng, tuy nhiên các vấn đề chưa leo thang thành khiếu nại chính thức.",
-    "Khách hàng giá trị cao, chủ động rời mạng": "Việc rời mạng không đi kèm dấu hiệu bất mãn nào cho thấy nguyên nhân nhiều khả năng đến từ yếu tố bên ngoài (giá cước, ưu đãi đối thủ cạnh tranh) hơn là trải nghiệm dịch vụ.",
-    "Khách hàng âm thầm rời mạng": "Việc không phát sinh khiếu nại hay liên hệ CSKH trước khi rời mạng phản ánh nhóm này nhiều khả năng đã âm thầm chuyển sang nhà mạng khác mà không qua kênh phản hồi chính thức.",
-    "Khách hàng giá trị cao nhưng trải nghiệm suy giảm": "Hành vi sử dụng suy giảm dần mà không đi kèm khiếu nại cho thấy nhóm khách hàng giá trị cao này nhiều khả năng đã rời mạng trong im lặng, không qua kênh phản hồi chính thức.",
-    "Khách hàng gặp sự cố kỹ thuật không được xử lý triệt để": "Việc liên hệ nhiều lần vì sự cố lặp lại trong khi khiếu nại vẫn tiếp tục tăng cho thấy vấn đề kỹ thuật nhiều khả năng chưa được xử lý dứt điểm qua các lần liên hệ.",
-    "Không rõ nguyên nhân hành vi (có thể do giá cước/cạnh tranh/khác)": "Việc không ghi nhận tín hiệu hành vi bất thường cho thấy quyết định rời mạng của nhóm này nhiều khả năng đến từ yếu tố ngoài dữ liệu quan sát được, không phải trải nghiệm dịch vụ.",
+    "Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH": "Nhóm chi tiêu cao này có mức sử dụng giảm rõ rệt nhưng không để lại bất kỳ liên hệ CSKH nào, nên dữ liệu hiện có không chứa thông tin về trải nghiệm của họ.",
+    "Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao": "Ba chỉ số liên hệ, khiếu nại và sự cố kỹ thuật cùng cao trong một nhóm; dữ liệu ghi nhận số lần phát sinh, không ghi nhận kết quả xử lý từng lần.",
+    "Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau": "Phân bố khiếu nại/sự cố lệch hẳn về giai đoạn đầu kỳ quan sát; dữ liệu không cho biết mức giảm về sau là do vấn đề được xử lý hay do khách hàng ngừng phản ánh.",
+    "Khiếu nại/sự cố tăng mạnh ở giai đoạn cuối kỳ": "Khiếu nại/sự cố tập trung ở giai đoạn cuối kỳ quan sát thay vì phân bố đều, cho thấy một thay đổi trong kỳ chứ không phải nền chung.",
+    "Liên hệ CSKH/cuộc gọi nhỡ ở mức cao": "Tần suất liên hệ cao trong khi khiếu nại và sự cố kỹ thuật không nổi bật. Dữ liệu chỉ có SỐ LẦN liên hệ, không có nội dung hay kết quả xử lý.",
+    "Chi tiêu cao, sử dụng ổn định, không khiếu nại": "Nhóm này không để lại tín hiệu bất thường nào trong toàn bộ dữ liệu hành vi hiện có, kể cả khi thuộc nhóm chi tiêu cao nhất.",
+    "Mức sử dụng suy giảm, chi tiêu không cao, không khiếu nại": "Mức sử dụng giảm dần là tín hiệu duy nhất ghi nhận được ở nhóm này; không có khiếu nại hay liên hệ CSKH nào đi kèm.",
+    "Không có tín hiệu nổi bật trong hành vi tương tác": "Không chỉ số tương tác nào của nhóm này vượt trội so với mặt bằng chung, nên nhóm được mô tả bằng chính các chỉ số định lượng của nó thay vì bằng một tín hiệu đặc trưng.",
 }
 # Tiền tố hay gặp trong FEATURE_SEMANTIC_MAP/pattern semantic name — cắt bỏ để nhét gọn vào câu
 # "có xu hướng {noun} cao gấp X lần" (giữ nguyên "Xu hướng" vì câu đã có sẵn từ "xu hướng").

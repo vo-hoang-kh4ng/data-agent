@@ -29,6 +29,7 @@ from sklearn.preprocessing import StandardScaler
 from triadic_dgm.persona.characterization import name_by_top_feature
 from triadic_dgm.persona.clustering import try_substage_cluster
 from triadic_dgm.persona.profiling import (
+    NO_STANDOUT_SIGNAL,
     compute_churn_drivers,
     compute_domain_signature,
     compute_profile_attributes,
@@ -215,10 +216,34 @@ def _dedupe_names(base_names: dict) -> dict:
     return final
 
 
+def _is_row_identifier(series: pd.Series) -> bool:
+    """True for a whole-numbered column holding a distinct value on every row.
+
+    Such a column cannot group rows — it is in bijection with them — so it contributes a
+    full-variance axis of pure noise to KMeans. Measured on a real 62,467-row export: OBJID
+    sat at a uniqueness ratio of 1.0000 while the highest real feature reached 0.1047.
+
+    The whole-number condition is what keeps this from eating real measurements: 450 draws
+    from a continuous distribution are all distinct too, and those must be kept.
+    """
+    values = series.dropna()
+    if len(values) < 2 or values.nunique() != len(values):
+        return False
+    return bool((values % 1 == 0).all())
+
+
 def _auto_features(data: pd.DataFrame, cluster_col: str) -> list[str]:
     """Every numeric column that actually varies — the pipeline's own deterministic choice."""
     numeric = data.select_dtypes(include="number")
-    return [c for c in numeric.columns if c != cluster_col and numeric[c].nunique(dropna=True) > 1]
+    feats, identifiers = [], []
+    for c in numeric.columns:
+        if c == cluster_col or numeric[c].nunique(dropna=True) <= 1:
+            continue
+        (identifiers if _is_row_identifier(numeric[c]) else feats).append(c)
+    if identifiers:
+        print(f"[PIPELINE] bỏ {len(identifiers)} cột định danh khỏi feature: "
+              + ", ".join(identifiers))
+    return feats
 
 
 def _prepare_matrix(data: pd.DataFrame, feats: list[str]):
@@ -469,6 +494,26 @@ def run_persona_pipeline(
         deduped = _dedupe_names({p["cluster_id"]: p["persona_name"] for p in personas})
         for p in personas:
             p["persona_name"] = deduped[p["cluster_id"]]
+
+    # Same defect, other path. The driver ladder's last rule fires when no interaction domain
+    # stands out, which is honest but says nothing that tells one such cluster from another.
+    # On a real 62,467-row churned base, 5 of 6 clusters landed there and the reader saw five
+    # groups — 10.0%, 9.9%, 50.2%, 3.2%, 3.6% — under one identical label. They are separate
+    # clusters precisely because they differ measurably, so name them by that difference.
+    # Clusters that DID match a driver rule keep its domain wording.
+    if mode != "GENERIC":
+        unsignalled = [p for p in personas
+                       if not p["is_anomaly"] and p.get("churn_driver") == NO_STANDOUT_SIGNAL]
+        if len(unsignalled) > 1:
+            for p, new_name in zip(unsignalled, name_by_top_feature(unsignalled, global_mean)):
+                if new_name:
+                    p["persona_name"] = new_name
+                    p["sample_persona_text"] = _sample_persona_text(
+                        new_name, p["feature_means"], global_mean
+                    )
+            deduped = _dedupe_names({p["cluster_id"]: p["persona_name"] for p in personas})
+            for p in personas:
+                p["persona_name"] = deduped[p["cluster_id"]]
 
     drivers = hidden_drivers(X_raw, data[cluster_col], feats)
     if drivers:

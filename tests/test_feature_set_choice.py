@@ -79,6 +79,32 @@ def test_silhouette_alone_cannot_arbitrate():
     assert sil(["noise_1", "noise_2"]) > sil(["spend", "visits", "noise_1", "noise_2"])
 
 
+def test_an_identifier_column_is_not_clustered_on():
+    """Measured on a real 62,467-row telco export: OBJID went straight into KMeans.
+
+    The prompt has always said "LOẠI BỎ cột định danh", but that is soft steering, and the
+    deterministic selector takes every numeric column that varies — which an identifier does,
+    maximally. A column holding a distinct value on every single row cannot group rows; it
+    only contributes a full-variance axis of noise.
+
+    Note the direction of the evidence: dropping OBJID LOWERED silhouette on that file
+    (0.2505 -> 0.2409). It is excluded because it is meaningless, not because it scores
+    badly — the same lesson as test_silhouette_alone_cannot_arbitrate above.
+    """
+    df = _separable()
+    df["OBJID"] = np.arange(len(df))
+    personas = run_persona_pipeline(df)
+    assert "OBJID" not in personas[0]["features_used"]
+
+
+def test_a_continuous_measure_is_kept_even_when_every_value_differs():
+    """The guard against over-correcting: 450 draws from a normal are all distinct too."""
+    df = _separable()
+    assert df["spend"].nunique() == len(df)  # the premise this test exists to protect
+    personas = run_persona_pipeline(df)
+    assert "spend" in personas[0]["features_used"]
+
+
 def test_no_caller_list_is_reported_as_auto():
     assert _selection(run_persona_pipeline(_separable())) == "auto"
 

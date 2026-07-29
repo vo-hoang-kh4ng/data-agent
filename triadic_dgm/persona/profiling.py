@@ -15,6 +15,11 @@ import pandas as pd
 
 from triadic_dgm.persona.columns import get_categorical_column, get_column
 
+#: Emitted by the last rule of the driver ladder: no interaction domain stands out. The
+#: pipeline treats it as a signal to name the cluster from its own measured deviations
+#: instead, so several such clusters do not all end up carrying one identical label.
+NO_STANDOUT_SIGNAL = 'Không có tín hiệu nổi bật trong hành vi tương tác'
+
 #: Telco behavioural domains, keyed by column-name fragments. Ported verbatim.
 DOMAIN_KEYWORD_GROUPS = {
     'complaint': ['complaint_total', 'complaint_avg', 'complaint_recent', 'complaint_trend', 'complaint_std', 'active_complaint_months', 'old_complaint', 'no_complaint'],
@@ -213,15 +218,15 @@ def classify_churn_driver(grp, domain_sig=None):
     # 1. Silent Premium Churn: giá trị cao + usage suy giảm rõ, HOÀN TOÀN không complaint/call/missed
     if s_value >= 4 and s_usage >= 3 and s_complaint <= 2 and s_call <= 2 and s_missed <= 2:
         return result(
-            'Khách hàng giá trị cao nhưng trải nghiệm suy giảm',
-            'Nhóm chi tiêu cao với hành vi sử dụng dịch vụ suy giảm rõ rệt, nhưng KHÔNG phát sinh khiếu nại hay liên hệ CSKH trước khi rời mạng — dấu hiệu "rời mạng trong im lặng" ở nhóm giá trị cao, nhiều khả năng đã chuyển sang đối thủ thay vì phản ánh vấn đề.',
+            'Chi tiêu cao, mức sử dụng suy giảm, không liên hệ CSKH',
+            'Nhóm chi tiêu cao, hành vi sử dụng dịch vụ suy giảm rõ rệt, và không ghi nhận khiếu nại hay liên hệ CSKH nào trong kỳ quan sát.',
             'MEDIUM')
 
     # 2. Support Failure: gọi nhiều + phàn nàn + sự cố kỹ thuật CÙNG LÚC — lặp lại nhiều lần không xử lý dứt điểm
     if s_call >= 4 and s_complaint >= 3 and s_technical >= 3:
         return result(
-            'Khách hàng gặp sự cố kỹ thuật không được xử lý triệt để',
-            'Tần suất liên hệ CSKH cao đi kèm sự cố kỹ thuật và khiếu nại đều tăng mạnh cùng lúc — cho thấy vấn đề kỹ thuật lặp lại nhiều lần mà không được giải quyết dứt điểm qua các lần liên hệ.',
+            'Liên hệ CSKH, khiếu nại và sự cố kỹ thuật cùng ở mức cao',
+            'Tần suất liên hệ CSKH, số khiếu nại và số sự cố kỹ thuật cùng tăng mạnh trong cùng kỳ quan sát.',
             'MEDIUM')
 
     # 3. Bất mãn thuần tuý do trải nghiệm dịch vụ (complaint là domain NỔI BẬT NHẤT)
@@ -236,12 +241,12 @@ def classify_churn_driver(grp, domain_sig=None):
         faded_out = (comp_t['recent'] < comp_t['old'] * 0.5 or cl_t['recent'] < cl_t['old'] * 0.5) and                     (comp_t['trend'] == 'giảm mạnh' or cl_t['trend'] == 'giảm mạnh')
         if had_early_problem and faded_out:
             return result(
-                'Bất mãn kéo dài, không được xử lý',
-                'Từng phát sinh khiếu nại/sự cố nhiều ở giai đoạn đầu, sau đó giảm dần và gần như im lặng trước khi rời mạng — dấu hiệu cho thấy khả năng vấn đề chưa từng được giải quyết triệt để, khách hàng "âm thầm" rời đi thay vì tiếp tục phản ánh.',
+                'Khiếu nại/sự cố cao ở giai đoạn đầu, giảm mạnh về sau',
+                'Khiếu nại/sự cố ghi nhận nhiều ở giai đoạn đầu kỳ quan sát, sau đó giảm dần và gần như không còn ở giai đoạn cuối.',
                 'MEDIUM')
         return result(
-            'Sự cố/khiếu nại cấp tính ngay trước khi rời mạng',
-            'Khiếu nại/sự cố tăng mạnh ở giai đoạn gần rời mạng so với trước đó — dấu hiệu một sự kiện cụ thể (sự cố kỹ thuật, trải nghiệm tệ) là nguyên nhân trực tiếp, khác với một quá trình bất mãn kéo dài.',
+            'Khiếu nại/sự cố tăng mạnh ở giai đoạn cuối kỳ',
+            'Khiếu nại/sự cố ở giai đoạn cuối kỳ quan sát cao hơn rõ rệt so với giai đoạn đầu, thay vì phân bố đều suốt kỳ.',
             'MEDIUM')
 
     # 4. Liên hệ CSKH/cuộc gọi nhỡ tăng cao (call/missed cao, KHÔNG đi kèm complaint/technical mạnh)
@@ -254,27 +259,27 @@ def classify_churn_driver(grp, domain_sig=None):
     # không nên gán nhãn theo call khi technical mới là tín hiệu nổi bật hơn).
     if (s_call >= 3 or s_missed >= 3) and max(s_call, s_missed) >= s_complaint and max(s_call, s_missed) >= s_technical:
         return result(
-            'Tăng liên hệ CSKH/cuộc gọi nhỡ trước khi rời mạng',
-            'Tần suất liên hệ CSKH/cuộc gọi nhỡ tăng cao gần thời điểm rời mạng — dữ liệu chỉ phản ánh SỐ LẦN liên hệ, không xác định được các lần liên hệ này đã được xử lý thoả đáng hay chưa.',
+            'Liên hệ CSKH/cuộc gọi nhỡ ở mức cao',
+            'Tần suất liên hệ CSKH/cuộc gọi nhỡ cao hơn mặt bằng chung, trong khi khiếu nại và sự cố kỹ thuật không nổi bật. Dữ liệu chỉ ghi nhận SỐ LẦN liên hệ, không ghi nhận nội dung hay kết quả xử lý.',
             'MEDIUM')
 
     # 5. Khách hàng giá trị cao, chủ động rời mạng (giá trị cao, MỌI domain khác đều thấp)
     if s_value >= 4 and s_complaint <= 2 and s_call <= 2 and s_usage <= 2:
         return result(
-            'Khách hàng giá trị cao, chủ động rời mạng',
-            'Nhóm chi tiêu cao, hành vi sử dụng dịch vụ vẫn ổn định và không phát sinh khiếu nại/sự cố — nguyên nhân rời mạng nhiều khả năng đến từ yếu tố NGOÀI trải nghiệm dịch vụ (giá cước, ưu đãi đối thủ cạnh tranh...) chứ không phải chất lượng dịch vụ.',
+            'Chi tiêu cao, sử dụng ổn định, không khiếu nại',
+            'Nhóm chi tiêu cao, hành vi sử dụng dịch vụ giữ ổn định trong kỳ, và không ghi nhận khiếu nại hay sự cố kỹ thuật nào.',
             'MEDIUM')
 
     # 6. Khách hàng âm thầm rời mạng (usage suy giảm, giá trị không cao, không phàn nàn)
     if s_usage >= 3 and s_value <= 2 and s_complaint <= 2 and s_call <= 2:
         return result(
-            'Khách hàng âm thầm rời mạng',
-            'Không phát sinh khiếu nại hay liên hệ CSKH đáng kể, nhưng hành vi sử dụng dịch vụ suy giảm dần trước khi rời mạng — dấu hiệu "rời mạng trong im lặng" thay vì phản ánh qua kênh CSKH trước.',
+            'Mức sử dụng suy giảm, chi tiêu không cao, không khiếu nại',
+            'Hành vi sử dụng dịch vụ suy giảm dần trong kỳ quan sát, trong khi chi tiêu không thuộc nhóm cao và không ghi nhận khiếu nại hay liên hệ CSKH đáng kể.',
             'MEDIUM')
 
     return result(
-        'Không rõ nguyên nhân hành vi (có thể do giá cước/cạnh tranh/khác)',
-        'Không phát hiện dấu hiệu khiếu nại hoặc sự cố đáng kể trong lịch sử tương tác — nguyên nhân rời mạng nhiều khả năng đến từ yếu tố NGOÀI hành vi tương tác (giá cước, đối thủ cạnh tranh, chuyển vùng...), không đủ dữ liệu hành vi để kết luận thêm.',
+        NO_STANDOUT_SIGNAL,
+        'Không ghi nhận khiếu nại, sự cố kỹ thuật hay mức liên hệ CSKH nào vượt trội so với mặt bằng chung. Nhóm này được mô tả bằng các chỉ số định lượng của chính nó, không bằng một tín hiệu tương tác đặc trưng.',
         'LOW')
 
 
