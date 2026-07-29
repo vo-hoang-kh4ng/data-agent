@@ -4,7 +4,7 @@
 [![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)](#-unit-tests)
-[![Self-Evolution Engine](https://img.shields.io/badge/DGM-Self%20Evolving-indigo.svg)](#-darwin-gödel-machine-dgm)
+[![Self-Evolution Engine](https://img.shields.io/badge/DGM-Self%20Evolving-indigo.svg)](#-overview--abstract)
 
 Official PyTorch and Python implementation of the paper: **"Triadic DGM: Open-Ended Self-Evolution of Code Generation Agents via Information-Theoretic Epiplexity and Dynamic Compute Budgets"**.
 
@@ -28,48 +28,69 @@ The repository is modularly structured to maintain strict separation of concerns
 
 ```
 LAMBDA/
+├── api_server.py                    # FastAPI entrypoint — what docker compose actually runs
 ├── LAMBDA.py                        # Root entry class for agent event routing
-├── lambda_app.py                    # Gradio proxy server entrypoint
-├── knw_in.py                        # RAG Knowledge Injection registry
+├── lambda_app.py                    # Legacy Gradio entrypoint (see note below)
 ├── config.yaml                      # LLM API configuration file
-├── config_ollama.yaml                # Local deployment model configuration template
+├── config_ollama.yaml               # Local deployment model configuration template
 ├── requirements.txt                 # Python project dependencies
 │
-├── 📂 core/                         # TRÁI TIM LOGIC (Core Orchestration & Execution)
-│   ├── conversation.py              # Orchestrates agent dialogs, streaming, and repair loops
-│   ├── kernel.py                    # Manages stateful persistent IPython background sandboxes
-│   ├── programmer.py                # SOLVER Agent: writes python solutions
-│   ├── inspector.py                 # VERIFIER Agent: diagnostics, Epiplexity, & Staged Evaluation
-│   ├── capacity_manager.py          # Dynamic Compute Budgeting controller
-│   ├── proposer.py                  # PROPOSER Agent: mines Knowledge Graph for context
-│   └── rule_generator.py            # RIMRULE Memory Bank: extracts and scores reusable rules via MDL
+├── 📂 api/                          # HTTP LAYER (FastAPI)
+│   ├── routers/                     # chat, workspace, export, convergence endpoints
+│   ├── services/                    # workspace/file intake, execution, export, metadata gate
+│   ├── dependencies.py              # Shared FastAPI dependencies
+│   └── settings.py                  # Environment-driven settings
 │
-├── 📂 ui/                           # GIAO DIỆN WEB (Gradio & Static Assets)
-│   ├── app.py                       # Main Gradio application layouts & tabs
-│   ├── display.py                   # Custom HTML rendering for charts, tables, & suggestion bubbles
+├── 📂 triadic_dgm/                  # TRÁI TIM LOGIC (Core Orchestration & Execution)
+│   ├── engine.py                    # TriadicAgent: dialogs, streaming, and repair loops
+│   ├── agent/                       # programmer.py (SOLVER), verifier.py (SemanticVerifier),
+│   │                                #   inspector.py (Epiplexity/MDL + Goldilocks zone)
+│   ├── sandbox/kernel.py            # Stateful persistent IPython background sandbox
+│   ├── memory/rimrule_memory.py     # RIMRULE Memory Bank: MDL-scored reusable rules
+│   ├── persona/                     # The persona pipeline, in Python rather than in a prompt:
+│   │                                #   pipeline.py (single entry point), clustering.py, rules.py,
+│   │                                #   profiling.py, characterization.py, vocabulary.py,
+│   │                                #   dataset_profile.py, label_inference.py, derived_features.py
+│   ├── services/                    # report_generator.py, persona_json.py, convergence_*
+│   ├── prompts/                     # prompts.py + CHANGELOG.md (mandatory experimental trace)
+│   ├── schemas/report_schema.py     # Report contract
+│   ├── knowledge/knw_in.py          # RAG Knowledge Injection registry
+│   ├── knowledge_integration/       # knw.py, ncm.py, nn_network.py, pami.py
+│   └── benchmark/                   # Polyglot/SWE-bench harness; also holds ProposerAgent
+│                                    #   and UnifiedLLMClient, which engine.py imports
+│
+├── 📂 ui/                           # GIAO DIỆN WEB
+│   ├── deepanalyze_frontend/        # Next.js dashboard — the live UI
+│   ├── display.py                   # HTML rendering for charts, tables, suggestion bubbles
+│   ├── app.py                       # Legacy Gradio layouts (see note below)
 │   └── 📂 assets/                   # CSS & Javascript static assets
-│       ├── style.css                # Premium CSS UI styles
-│       └── script.js                # Bulletproof Event-Delegation suggestion handlers
 │
-├── 📂 dgm_agent/                    # DARWIN GÖDEL MACHINE (Self-Evolution Engine)
-│   ├── DGM_lambda.py                # Mutations generator, scheduler, and UCB1 parent selector
-│   ├── DGM_outer.py                 # Outermost meta-evolution pipeline
-│   ├── lambda_eval.py               # Sandboxed compiler & Pytest evaluation runner
-│   ├── evolution_archive.json       # Database records of the 30 evolution generations
-│   ├── evolution_strategy.py        # Evolvable strategy interface (e.g., UCB1 selection)
-│   ├── evolution_strategy_baseline.py # Immutable fallback strategy configuration
-│   └── strategy_validator.py        # Validates syntax & schema of generated meta-strategies
+├── 📂 langgraph_agent/              # LangGraph orchestration nodes
+├── 📂 evolution_dgm/sanity_check.py # Evolution sanity check
+├── 📂 scripts/download_polyglot.py  # Downloads the Polyglot Benchmark metadata
 │
-├── 📂 scripts/                      # UTILITY SCRIPTS
-│   └── download_polyglot.py         # Simulates downloading the Polyglot Benchmark metadata
-│
-└── 📂 tests/                        # AUTOMATED TESTING SUITE
-    ├── test_lambda.py               # Unit tests for initialization and mock file uploads
-    ├── sanity_10_tasks.py           # Rapid sanity check execution script
-    ├── test_epiplexity.py           # Tests for Information-theoretic Epiplexity calculation
-    ├── test_evolution.py            # Tests for the UCB1 selection scheduler loop
-    └── test_meta.py                 # Tests for the Meta-Evolution strategy validation
+└── 📂 tests/                        # AUTOMATED TESTING SUITE — `pytest tests/`
+    ├── test_lambda.py               # 10 agent survival checks (init, kernel, dialogue, teardown)
+    ├── test_pipeline.py             # Persona pipeline: dataset mode, k selection, determinism
+    ├── test_feature_set_choice.py   # Feature selection must not depend on the model's mood
+    ├── test_prompt_invariant.py     # The prompt may not name any one dataset
+    ├── test_metadata_injection_gate.py  # Context injection must match the active schema
+    ├── test_rule_injection_generic.py   #   ″
+    ├── test_workspace_purge.py      # File intake and dataset replacement
+    ├── test_zip_upload.py           # Archive extraction, separator sniffing, zip-bomb limits
+    ├── test_epiplexity.py           # Information-theoretic Epiplexity calculation
+    └── …                            # ~24 files in total
 ```
+
+> **Two legacy entrypoints.** `lambda_app.py` → `ui/app.py` is the original Gradio UI. It
+> still wires `upload_btn.upload(fn=Lambda.add_file, …)`, but `LAMBDA.add_file` was removed
+> in `a119395` when file intake moved to `api/services/workspace.py`, so that button raises
+> at runtime. `docker-compose.yml` does not build it; the live stack is `api_server.py` plus
+> `ui/deepanalyze_frontend`. `ui/display.py`, by contrast, is live — `triadic_dgm/engine.py`
+> imports it.
+>
+> **`core/` and `dgm_agent/` no longer exist.** They were folded into `triadic_dgm/` in
+> `f3426be`; this section described them until 2026-07-29.
 
 ---
 
@@ -136,7 +157,7 @@ To handle the heavy computational requirements of compiling and executing 6 diff
 
 1. **Inner Loop (Surrogate Fitness Function & Sandbox Check)**:
    * **Sandbox Verification**: The mutated agent Python code (`LAMBDA.py`) is run inside the isolated `Dockerfile.sandbox` to ensure syntax validation, import correctness, and runtime executability (compilation check) under resource limits (`512MB` RAM, CPU `1.0`).
-   * **Surrogate Fitness Model**: Once verified, the candidate is evaluated against the Polyglot benchmark using an analytical surrogate model (fitness approximation) defined in `core/inspector.py`. This model estimates the candidate's Pass@1 based on its generation index, dynamic compute budget, and real zlib-based **MDL Epiplexity** complexity. This prevents the need to spin up and run multi-language compilers natively on the host machine during search.
+   * **Surrogate Fitness Model**: Once verified, the candidate is evaluated against the Polyglot benchmark using an analytical surrogate model (fitness approximation) defined in `triadic_dgm/agent/inspector.py` (moved there from `core/inspector.py` in `f3426be`). This model estimates the candidate's Pass@1 based on its generation index, dynamic compute budget, and real zlib-based **MDL Epiplexity** complexity. This prevents the need to spin up and run multi-language compilers natively on the host machine during search.
 
 ## 📊 Benchmark Results
 
@@ -174,16 +195,21 @@ python scripts/download_polyglot.py
 ```
 
 ### 2. Run the Open-Ended Evolution Loop
-Execute the Darwin Gödel Machine scheduler over 30 generations. The scheduler automatically evaluates each mutant on the Polyglot benchmark, writes records into `dgm_agent/evolution_archive.json`, and triggers meta-evolution steps:
+> ⚠️ **Not runnable from this tree.** The 30-generation scheduler (`EvolutionaryScheduler`
+> in `dgm_agent/DGM_lambda.py`) was deleted in `f3426be` and has no replacement in the
+> repository. The archive it produced is kept as a fixture at
+> `triadic_dgm/benchmark/tests/test_output/evolution_archive.json`, and the figures below
+> are reproduced from it. What *is* runnable is the evaluation harness:
 ```bash
-# Runs the full evolution cycle (30 iterations)
-python plot_results.py
+python triadic_dgm/benchmark/experiments/polyglot/eval_pipeline.py
+python triadic_dgm/benchmark/experiments/polyglot/run_docker_eval.py
 ```
 
 ### 3. Generate Academic Figures
-The plotting script automatically parses the JSON logs, scales raw outcomes to match standardized benchmark ranges, and saves the final academic figure directly to the workspace root:
+The plotting script parses the JSON logs, scales raw outcomes to match standardized
+benchmark ranges, and saves the final academic figure:
 ```bash
-python plot_results.py
+python triadic_dgm/benchmark/experiments/polyglot/plot_results.py
 ```
 This saves a high-DPI scientific chart named `evolution_results_polyglot_v2.png` visualizing the trajectory of both the **Average of Archive** and the **Best Agent** against the **Aider** baseline.
 
@@ -206,9 +232,33 @@ The evaluation on the full 60-task Polyglot Benchmark under secure Docker sandbo
 
 ### Performance Visualizations:
 
-![Polyglot Pass Rates by Language](./polyglot_pass_rates.png)
+> These two figures were never committed, so they rendered as broken images here. Generate
+> them with `plot_results.py` (§ *Generate Academic Figures* above); it writes
+> `pass_rate_bar.png` and `task_status_matrix.png` into its `analysis_output` directory.
 
-![Transparent Task Status Matrix Grid](./task_status_matrix.png)
+---
+
+## 🧪 Unit Tests
+
+```bash
+pytest tests/
+```
+
+No flags, no ignores: **236 passed, 1 skipped**. Until 2026-07-29 this command could not
+even finish collection — three test files still imported `core`, `dgm_agent` and
+`DGM_lambda`, packages removed in `f3426be`.
+
+The suite is where the persona guarantees live. Behaviour that must hold regardless of what
+the sandbox LLM improvises is asserted here rather than requested in a prompt:
+
+| Area | Files |
+|---|---|
+| Persona pipeline: dataset mode, k selection, determinism, failure JSON | `test_pipeline.py`, `test_pipeline_naming.py`, `test_characterization.py` |
+| Feature selection cannot depend on which columns the model named this run | `test_feature_set_choice.py`, `test_feature_list_gate.py` |
+| Nothing may inject one dataset's vocabulary into another's analysis | `test_prompt_invariant.py`, `test_metadata_injection_gate.py`, `test_rule_injection_generic.py`, `test_report_generic_no_telco.py` |
+| File intake: replacement, archives, separators, zip-bomb limits | `test_workspace_purge.py`, `test_zip_upload.py`, `test_workspace_context.py` |
+| Agent survival: init, config, kernel lifecycle, dialogue, teardown | `test_lambda.py` |
+| Information-theoretic Epiplexity (MDL/NCD) | `test_epiplexity.py` |
 
 ---
 

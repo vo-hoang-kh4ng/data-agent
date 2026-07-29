@@ -27,9 +27,12 @@ Cách này đơn giản nhất, không cần cài đặt Node.js hay Python rư�
    docker compose up -d --build
    ```
 3. Đợi vài phút để Docker cài đặt thư viện. Sau khi xong, bạn có thể truy cập:
-   - 🌐 **DeepAnalyze Dashboard (Giao diện chính):** [http://localhost:13000](http://localhost:13000)
+   - 🌐 **DeepAnalyze Dashboard (Giao diện chính):** [http://localhost:3014](http://localhost:3014)
    - ⚙️ **Backend API (Swagger UI):** [http://localhost:18000/docs](http://localhost:18000/docs)
-   - 💬 **Open WebUI (Giao diện Chat tùy chọn):** [http://localhost:18080](http://localhost:18080)
+
+   Hai cổng này lấy từ `docker-compose.yml` (`3014:3000` và `18000:8000`). Dịch vụ
+   Open WebUI từng được nhắc ở đây đang bị comment trong `docker-compose.yml`, nên
+   `docker compose up` không dựng nó.
 
 *(Để tắt hệ thống, chạy lệnh: `docker compose down`)*
 
