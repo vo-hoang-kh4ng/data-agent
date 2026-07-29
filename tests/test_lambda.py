@@ -1,17 +1,12 @@
 import os
 import sys
 import pytest
-from pathlib import Path
 
-# Add the parent directory and dgm_agent to sys.path so we can import LAMBDA and utilities
+# Add the parent directory to sys.path so we can import LAMBDA and utilities.
+# The old `dgm_agent` entry was dropped: that package was deleted in f3426be.
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, repo_root)
-sys.path.append(os.path.join(repo_root, "dgm_agent"))
 from LAMBDA import LAMBDA
-
-class FakeFile:
-    def __init__(self, name):
-        self.name = name
 
 # ==========================================================
 #              10 CORE AGENT SURVIVAL CHECKS
@@ -35,27 +30,13 @@ def test_3_session_cache_folder():
     assert agent.session_cache_path is not None
     assert os.path.exists(agent.session_cache_path)
 
-def test_4_file_upload_handling():
-    """Test 4: Verifies file upload copying and session folder registration."""
-    agent = LAMBDA(config_path='config.yaml')
-    temp_file_path = "tests/temp_upload_test.csv"
-    os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
-    with open(temp_file_path, "w", encoding="utf-8") as f:
-        f.write("customer_id,age\nC001,30\nC002,40\n")
-    
-    try:
-        fake_file = FakeFile(temp_file_path)
-        status_msg = agent.add_file(fake_file)
-        
-        assert isinstance(status_msg, list)
-        assert len(status_msg) == 1
-        assert "role" in status_msg[0]
-        # Verify file registered inside the session cache folder
-        cache_file = os.path.join(agent.session_cache_path, "temp_upload_test.csv")
-        assert os.path.exists(cache_file)
-    finally:
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+# Test 4 used to call LAMBDA.add_file. That method was removed in a119395 when file
+# intake moved off the agent and into the API: api/services/workspace.py::
+# upload_files_to_workspace. The test kept asserting against the removed method and so
+# only ever reported AttributeError. The behaviour it cared about — an uploaded file
+# landing in the session workspace — is tested against the code that actually runs it,
+# in tests/test_workspace_purge.py and tests/test_zip_upload.py, so it is not restored
+# here.
 
 def test_5_conversational_streaming_router():
     """Test 5: Verifies streaming workflow message initialization routing."""
@@ -108,7 +89,11 @@ def test_10_memory_cleanup_and_shutdown():
     kernel_ref = agent.conv.kernel
     
     agent.clear_all("", [])
-    # Verify dataset reference is cleared
-    assert agent.conv.my_data_cache is None
-    # Verify the old Jupyter kernel was shut down cleanly
+    # The old assertion read `agent.conv.my_data_cache is None`. TriadicAgent has no such
+    # attribute, so the test raised AttributeError instead of checking anything. What
+    # TriadicAgent.clear() actually guarantees is asserted instead:
+    # conversation history emptied, the old kernel shut down, a fresh one in its place.
+    assert agent.conv.messages == []
     assert kernel_ref.is_alive() is False
+    assert agent.conv.kernel is not kernel_ref
+    assert agent.conv.kernel.is_alive() is True

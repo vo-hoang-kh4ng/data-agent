@@ -1,6 +1,8 @@
-import os
 import pytest
-from core.inspector import compute_mdl_epiplexity, Verifier
+
+# Moved from `core/inspector.py` in f3426be; the tests were never repointed, so this
+# file has been failing to collect ever since. Both symbols survived the move intact.
+from triadic_dgm.agent.inspector import compute_mdl_epiplexity, Verifier
 
 def test_compute_mdl_epiplexity():
     # Test 1: Trivial code
