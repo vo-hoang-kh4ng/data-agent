@@ -434,8 +434,14 @@ export function PersonaCards({ data }: PersonaCardsProps) {
             {actualData.map((p) => {
               const profile = p.profile_attributes || {};
               const profileKeys = Object.keys(profile).filter((k) => k in PROFILE_ATTRIBUTE_LABELS);
+              // A persona carrying churn_driver came off the POST_CHURN path: this customer
+              // has already left, so a script that apologises and promises first-call
+              // resolution is addressed to somebody the company no longer has. Mirrors
+              // should_offer_retention() in triadic_dgm/services/report_generator.py — the
+              // report and this panel must not disagree about who is still reachable.
               const scripts =
-                p.risk_tier?.includes("giữ chân") || p.severity === "HIGH" || p.severity === "EXTREME" || p.risk === "HIGH" || p.risk === "EXTREME"
+                !p.churn_driver &&
+                (p.risk_tier?.includes("giữ chân") || p.severity === "HIGH" || p.severity === "EXTREME" || p.risk === "HIGH" || p.risk === "EXTREME")
                   ? attachRecommendedScripts(p)
                   : [];
 

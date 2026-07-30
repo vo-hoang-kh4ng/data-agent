@@ -480,6 +480,84 @@ _NARRATIVE_NOUN_STRIP_PREFIXES = [
 # vốn chỉ hợp với KH đang hoạt động. KHÔNG đổi chuỗi risk_tier GỐC (dùng để group/match, và frontend
 # persona-cards.tsx hardcode đúng 3 chuỗi này) — chỉ đổi NHÃN HIỂN THỊ trong markdown khi persona có
 # churn_driver (POST_CHURN), để tránh đề xuất "giữ chân" người ĐÃ rời mạng.
+#: Vietnamese numerals the narrative LLM writes out in words, 2..10.
+_NUMBER_WORDS = {2: "hai", 3: "ba", 4: "bốn", 5: "năm", 6: "sáu",
+                 7: "bảy", 8: "tám", 9: "chín", 10: "mười"}
+
+#: Nouns the report uses for a persona. A numeral is only rewritten when one follows it, so
+#: "trong ba tháng gần đây" and "năm chỉ số" are left alone.
+_GROUP_NOUNS = ("nhóm", "chân dung", "phân khúc", "persona")
+
+_GROUP_COUNT_RE = re.compile(
+    r"\b(" + "|".join(list(_NUMBER_WORDS.values()) + [r"\d+"]) + r")\s+(" +
+    "|".join(_GROUP_NOUNS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def correct_group_count(text, actual_count):
+    """Rewrite any stated number of personas to the number actually rendered.
+
+    A real report said "xác định ba chân dung chính" and "Ba nhóm khách hàng ... được phân
+    tích" above a table of five. The count comes from the narrative LLM, which has no way to
+    know it and every opportunity to guess plausibly, and it is the first thing a reader
+    checks against the table underneath.
+
+    Tightening the prompt would not fix it — the prompt already forbids inventing figures.
+    A count is arithmetic, so it is repaired here instead of requested there.
+
+    Args:
+        text: Generated prose. Returned unchanged if empty.
+        actual_count: Personas actually rendered. Falsy means "unknown" and nothing is
+            rewritten — never correct prose against a total we do not have.
+
+    Returns:
+        The prose with every group count set to ``actual_count``, capitalisation preserved.
+    """
+    if not text or not actual_count:
+        return text
+    as_word = _NUMBER_WORDS.get(actual_count, str(actual_count))
+
+    def fix(match):
+        numeral, noun = match.group(1), match.group(2)
+        # Keep the form the model chose: a digit stays a digit, a word stays a word.
+        # Rewriting "3 nhóm" as "năm nhóm" would read as an edit rather than a count.
+        replacement = str(actual_count) if numeral.isdigit() else as_word
+        if numeral.lower() == replacement:
+            return match.group(0)
+        # Keep sentence-initial capitals: "Ba nhóm..." must not become "năm nhóm...".
+        word = replacement.capitalize() if numeral[:1].isupper() else replacement
+        return f"{word} {noun}"
+
+    return _GROUP_COUNT_RE.sub(fix, text)
+
+
+def should_offer_retention(persona: dict) -> bool:
+    """True when a retention script belongs on this persona.
+
+    Two conditions, and the first one is the whole point: a persona carrying ``churn_driver``
+    came off the POST_CHURN path, meaning this customer has ALREADY left. A script that
+    apologises and promises first-call resolution is addressed to somebody the company still
+    has. The real report offered one to four of five groups on a cohort its own Raw Facts
+    panel described as "Toàn bộ mẫu đã rời mạng".
+
+    The scripts stay correct for the ACTIVE base showing the same behaviour; they just do
+    not belong in a post-mortem.
+
+    Args:
+        persona: One persona dict from the pipeline.
+
+    Returns:
+        Whether to render the retention block.
+    """
+    if persona.get('churn_driver'):
+        return False
+    risk_tier = persona.get('risk_tier') or ''
+    return ("giữ chân" in risk_tier
+            or persona.get('severity') in ("HIGH", "EXTREME")
+            or persona.get('risk') in ("HIGH", "EXTREME"))
+
+
 _POST_CHURN_TIER_DISPLAY_LABELS = {
     "Nhóm rủi ro cao – cần hành động ưu tiên": "Nhóm có tín hiệu hành vi rõ ràng trước khi rời mạng",
     "Nhóm bị động – theo dõi & cảnh báo": "Nhóm không có dấu hiệu hành vi rõ ràng trước khi rời mạng",
@@ -504,6 +582,21 @@ def _strip_forbidden_sentences(text: str) -> str:
         if s.strip() and not contains_forbidden_term(s)
     ]
     return " ".join(kept).strip()
+
+
+def _correct_narrative_group_counts(narrative: "ReportNarrative", actual_count: int) -> None:
+    """Set every stated persona count in the prose to the number actually rendered.
+
+    In place, and never raising: a wrong count is a blemish, losing the whole narrative to an
+    attribute error would be worse.
+    """
+    try:
+        summary = narrative.executive_summary
+        summary.executive_overview = correct_group_count(summary.executive_overview, actual_count)
+        narrative.conclusion = correct_group_count(narrative.conclusion, actual_count)
+    except Exception as e:  # noqa: BLE001 - narrative shape varies with the LLM response
+        # `print`, matching _sanitize_generic_narrative below: this module has no logger.
+        print(f"[ReportGenerator] group-count correction skipped: {e}")
 
 
 def _sanitize_generic_narrative(narrative: "ReportNarrative") -> None:
@@ -1856,6 +1949,12 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
         # contain is dropped rather than shown to the user as analysis.
         if personas_data and all(p.get('dataset_mode') == 'GENERIC' for p in personas_data):
             _sanitize_generic_narrative(result)
+        # Applies to EVERY dataset, unlike the sanitiser above: the model states how many
+        # personas it is describing, and has no way to know. A real report said "xác định ba
+        # chân dung chính" and "Ba nhóm khách hàng ... được phân tích" directly above a table
+        # of five. A count is arithmetic, so it is corrected here rather than requested in the
+        # prompt, which already forbids inventing figures and was ignored anyway.
+        _correct_narrative_group_counts(result, len(personas_data or []))
         return result
 
     def _fallback_narrative(self) -> ReportNarrative:
@@ -2174,9 +2273,7 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
                         md += f"- {label}: {val}\n"
                 md += "\n"
 
-            # Retention Scripts — only for the "cần giữ chân ngay" tier or HIGH+/EXTREME severity/risk
-            risk_tier = p.get('risk_tier') or ''
-            if "giữ chân" in risk_tier or p.get('severity') in ("HIGH", "EXTREME") or p.get('risk') in ("HIGH", "EXTREME"):
+            if should_offer_retention(p):
                 scripts = attach_recommended_scripts(p)
                 if scripts:
                     md += "**Retention Scripts:**\n"
