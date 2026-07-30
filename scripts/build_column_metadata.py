@@ -96,6 +96,11 @@ NAMING_RULES: list[tuple[str, str, str, str]] = [
 NEEDS_REVIEW = {"thấp", "không"}
 REVIEW_COLUMN = "mo_ta_nghiep_vu_xac_nhan"
 
+#: Tên cột "tên cột" và "mô tả" mà file review có thể quay về dưới nhiều dạng — xem
+#: load_confirmations().
+_NAME_HEADERS = ("cot", "Cột", "column", "Column")
+_DESCRIPTION_HEADERS = ("mo_ta_suy_doan_cua_may", "Mô tả", "mo_ta", "description")
+
 
 def infer(column: str) -> tuple[str, str, str]:
     """Trả (nhóm, mô tả suy đoán, độ tin cậy) cho một tên cột."""
@@ -105,23 +110,82 @@ def infer(column: str) -> tuple[str, str, str]:
     return "Chưa phân loại", "Không khớp quy ước đặt tên nào đã biết. Cần nghiệp vụ mô tả.", "không"
 
 
+def _first_header(frame: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
+    return next((h for h in candidates if h in frame.columns), None)
+
+
 def load_confirmations(review_path: Path) -> dict[str, str]:
-    """Mô tả nghiệp vụ đã điền ở lần chạy trước, nếu có."""
+    """Mô tả nghiệp vụ đã xác nhận, đọc từ file review quay về.
+
+    Người làm nghiệp vụ soát bằng Excel/Google Sheets, nên file quay về hiếm khi giữ
+    nguyên hình dạng đã gửi đi. Bản Churn_VT quay về đã: đổi tiêu đề cột sang tiếng Việt
+    có dấu (`cot` → `Cột`, `mo_ta_suy_doan_cua_may` → `Mô tả`), bỏ hẳn cột `do_tin_cay`,
+    xoá dòng OBJID, và — điểm quan trọng nhất — SỬA THẲNG vào cột mô tả thay vì điền vào
+    ô trống dành riêng. Bản đọc cũ chỉ nhìn đúng hai tiêu đề gốc nên nhận về 0 xác nhận
+    trong khi file có 52.
+
+    Vì vậy: chấp nhận nhiều biến thể tiêu đề, và coi một mô tả là ĐÃ XÁC NHẬN khi nó khác
+    với suy đoán hiện tại của máy cho đúng cột đó. infer() là hàm thuần nên phép so sánh
+    này ổn định qua các lần chạy lại.
+    """
     if not review_path.exists():
         return {}
     previous = pd.read_csv(review_path)
-    if REVIEW_COLUMN not in previous.columns:
+    name_header = _first_header(previous, _NAME_HEADERS)
+    if name_header is None:
         return {}
-    filled = previous[previous[REVIEW_COLUMN].notna() & (previous[REVIEW_COLUMN].astype(str).str.strip() != "")]
-    return dict(zip(filled["cot"], filled[REVIEW_COLUMN].astype(str).str.strip()))
+
+    def cleaned(header: str | None) -> dict[str, str]:
+        if header is None:
+            return {}
+        filled = previous[previous[header].notna() & (previous[header].astype(str).str.strip() != "")]
+        return dict(zip(filled[name_header].astype(str), filled[header].astype(str).str.strip()))
+
+    # Ô trống dành riêng thắng, vì điền vào đó là hành động rõ ràng nhất; mô tả bị sửa
+    # thẳng chỉ tính khi nó lệch khỏi suy đoán của máy.
+    confirmed = {
+        name: text for name, text in cleaned(_first_header(previous, _DESCRIPTION_HEADERS)).items()
+        if text != infer(name)[1]
+    }
+    confirmed.update(cleaned(REVIEW_COLUMN if REVIEW_COLUMN in previous.columns else None))
+    return confirmed
 
 
-def build(csv_path: Path) -> tuple[Path, Path, int, int]:
+def load_group_overrides(review_path: Path) -> dict[str, str]:
+    """Nhóm nghiệp vụ đã sửa lại trong file review.
+
+    Cùng cơ chế với load_confirmations(): nhóm nào khác suy đoán của máy là nhóm đã được
+    sửa có chủ đích. Trên bản Churn_VT quay về có 16 cột bị xếp lại nhóm, và chúng sửa
+    những chỗ máy đoán SAI HẲN chứ không phải đổi cách gọi: `branch_*` không phải chỉ số
+    chi nhánh mà là thống kê lưu lượng (LLSD), `total_negative_*` là điểm chạm tiêu cực
+    chứ không phải chỉ số chất lượng đường truyền.
+    """
+    if not review_path.exists():
+        return {}
+    previous = pd.read_csv(review_path)
+    name_header = _first_header(previous, _NAME_HEADERS)
+    group_header = _first_header(previous, ("nhom", "Nhóm", "group"))
+    if name_header is None or group_header is None:
+        return {}
+    filled = previous[previous[group_header].notna() & (previous[group_header].astype(str).str.strip() != "")]
+    return {
+        str(name): str(group).strip()
+        for name, group in zip(filled[name_header], filled[group_header])
+        if str(group).strip() != infer(str(name))[0]
+    }
+
+
+def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Path, int, int]:
     stem = csv_path.stem
     json_path = csv_path.with_name(f"{stem}_metadata.json")
     review_path = csv_path.with_name(f"{stem}_metadata_review.csv")
 
-    confirmed = load_confirmations(review_path)
+    # File quay về thường KHÔNG còn tên cũ — Google Sheets xuất ra
+    # "Churn_VT_metadata_review - Churn_VT_metadata_review.csv". Đọc xác nhận từ đó,
+    # nhưng vẫn ghi đè bản chuẩn ở review_path để vòng sau gửi đi từ một chỗ duy nhất.
+    source_of_truth = returned_review or review_path
+    confirmed = load_confirmations(source_of_truth)
+    regrouped = load_group_overrides(source_of_truth)
     df = pd.read_csv(csv_path, low_memory=False)
     total_rows = len(df)
 
@@ -129,6 +193,7 @@ def build(csv_path: Path) -> tuple[Path, Path, int, int]:
     for name in df.columns:
         series = df[name]
         group, guess, confidence = infer(str(name))
+        group = regrouped.get(name, group)
         description = confirmed.get(name, guess)
         is_confirmed = name in confirmed
         numeric = pd.api.types.is_numeric_dtype(series)
@@ -178,12 +243,15 @@ def build(csv_path: Path) -> tuple[Path, Path, int, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("csv_path", type=Path, help="đường dẫn tới file CSV nguồn")
+    parser.add_argument("--review", type=Path, default=None,
+                        help="file review nghiệp vụ gửi về, nếu đã bị đổi tên khi tải xuống")
     args = parser.parse_args()
-    if not args.csv_path.exists():
-        print(f"không thấy file: {args.csv_path}", file=sys.stderr)
-        return 1
+    for path in (args.csv_path, args.review):
+        if path is not None and not path.exists():
+            print(f"không thấy file: {path}", file=sys.stderr)
+            return 1
 
-    json_path, review_path, n_cols, n_review = build(args.csv_path)
+    json_path, review_path, n_cols, n_review = build(args.csv_path, args.review)
     print(f"{json_path.name}   {n_cols} cột — định dạng hệ thống đọc được")
     print(f"{review_path.name}   gửi nghiệp vụ, {n_review} cột cần xác nhận")
     print(f"\nSau khi nghiệp vụ điền cột '{REVIEW_COLUMN}', chạy lại đúng lệnh này "
