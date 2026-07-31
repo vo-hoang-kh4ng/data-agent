@@ -90,6 +90,26 @@ def _rendered_strings() -> list[tuple[int, str]]:
 _PROMPT_MARKER = "Bạn là Consultant tại Deloitte"
 
 
+def _filter_vocabulary() -> frozenset[str]:
+    """The phrase lists strip_causal_sentences() matches on.
+
+    A filter has to name what it removes, exactly as the prompt has to name what it forbids.
+    These strings are never rendered — they are compared against the model's prose — so they
+    are exempt from the scan, and read from the module rather than duplicated here so the
+    exemption can never drift away from what is actually in the lists.
+    """
+    from triadic_dgm.services import report_generator as rg
+
+    return frozenset(rg._CAUSAL_ASSERTIONS) | frozenset(rg._CAUSAL_ADMISSIONS)
+
+
+def test_the_filter_vocabulary_is_not_empty():
+    """Without this, emptying the lists would silently satisfy every exemption below."""
+    vocabulary = _filter_vocabulary()
+    assert len(vocabulary) > 10
+    assert "dẫn đến" in vocabulary
+
+
 def _narrative_prompt() -> str:
     matches = [text for _, text in _rendered_strings() if _PROMPT_MARKER in text]
     assert len(matches) == 1, f"expected exactly one narrative prompt, found {len(matches)}"
@@ -136,7 +156,7 @@ def test_no_rendered_string_names_a_cause_the_data_cannot_evidence(phrase):
     offenders = [
         (line, text) for line, text in _rendered_strings()
         if phrase in text.lower() and text.strip() not in _ACTION_AND_KPI_CATALOGUE
-        and _PROMPT_MARKER not in text
+        and _PROMPT_MARKER not in text and text.strip() not in _filter_vocabulary()
     ]
     assert not offenders, _report(offenders)
 
@@ -145,6 +165,6 @@ def test_nguyen_nhan_appears_only_in_an_action_that_goes_and_asks():
     offenders = [
         (line, text) for line, text in _rendered_strings()
         if "nguyên nhân" in text.lower() and text.strip() not in _ACTIONS_THAT_GO_AND_ASK
-        and _PROMPT_MARKER not in text
+        and _PROMPT_MARKER not in text and text.strip() not in _filter_vocabulary()
     ]
     assert not offenders, _report(offenders)

@@ -633,6 +633,99 @@ def _strip_forbidden_sentences(text: str) -> str:
     return " ".join(kept).strip()
 
 
+#: Wording that ASSERTS why somebody left. The data holds interaction counts, fees and usage
+#: trends; it holds no exit survey and no cancellation reason, so none of these is available
+#: to state. Matched case-insensitively against each sentence.
+_CAUSAL_ASSERTIONS = (
+    "dẫn đến",
+    "gây ra",
+    "là nguyên nhân",
+    "nguyên nhân chính",
+    "nguyên nhân là",
+    "yếu tố góp phần",
+    "điểm nóng chính",
+    "khiến khách hàng",
+    "khiến nhóm này",
+    "lý do rời mạng là",
+    # Claims about an unmeasured internal state. The file records how many faults occurred;
+    # no column records whether anyone found the experience poor or was dissatisfied, so
+    # naming a feeling is the same overreach as naming a cause. These caught the one sentence
+    # the mechanism phrases above missed: "phản ánh trải nghiệm dịch vụ chưa tốt".
+    #
+    # Bare "phản ánh" is deliberately NOT here — "khách hàng phản ánh sự cố" describes
+    # somebody filing a complaint, which is a recorded event.
+    "trải nghiệm dịch vụ chưa tốt",
+    "trải nghiệm dịch vụ kém",
+    "trải nghiệm tiêu cực",
+    "trải nghiệm kém",
+    "không hài lòng",
+    "bất mãn",
+)
+
+#: Wording that ADMITS the cause is not in the data. A sentence carrying one of these keeps
+#: its place whatever else it says: "nguyên nhân nằm ngoài phạm vi dữ liệu hiện có" contains
+#: the forbidden word and is the most honest line in the report. Refusing to say it would
+#: make the report less truthful, not more careful — the same exemption the action catalogue
+#: already gets for recommending an exit survey.
+_CAUSAL_ADMISSIONS = (
+    "nằm ngoài phạm vi",
+    "không cho biết",
+    "không được phản ánh",
+    "chưa đủ căn cứ",
+    "cần bổ sung",
+    "khảo sát",
+    "không ghi nhận",
+    "chưa xác định",
+)
+
+
+def strip_causal_sentences(text: str) -> str:
+    """Drop every sentence that states WHY a customer left, keeping those that say it is unknown.
+
+    The AST scan in ``test_report_strings_state_no_cause.py`` proves no static string in this
+    module asserts a cause, and it holds. It cannot see the half of the report a model writes
+    at run time, and that half kept asserting one — "một thay đổi cụ thể ... đã dẫn đến quyết
+    định rời mạng" was printed by a report whose prompt forbids exactly that, in capitals.
+
+    A rule in a prompt is a request. The group count moved into Python for the same reason.
+
+    Returns:
+        The surviving sentences joined back up, or "" when none survive — callers treat empty
+        prose as "no LLM narrative" and fall back to the deterministic sections, which is the
+        right outcome: a shorter report beats a confident wrong one.
+    """
+    if not text:
+        return ""
+    kept = []
+    for sentence in _SENTENCE_SPLIT_RE.split(text.strip()):
+        if not sentence.strip():
+            continue
+        lowered = sentence.lower()
+        asserts = any(p in lowered for p in _CAUSAL_ASSERTIONS)
+        admits = any(p in lowered for p in _CAUSAL_ADMISSIONS)
+        if asserts and not admits:
+            continue
+        kept.append(sentence.strip())
+    return " ".join(kept).strip()
+
+
+def _strip_causal_narrative(narrative: "ReportNarrative") -> None:
+    """Apply :func:`strip_causal_sentences` to every field the model writes, in place.
+
+    Never raises: losing the whole narrative to an attribute error would be worse than a
+    causal sentence surviving.
+    """
+    try:
+        summary = narrative.executive_summary
+        summary.executive_overview = strip_causal_sentences(summary.executive_overview)
+        narrative.conclusion = strip_causal_sentences(narrative.conclusion)
+        for pn in narrative.personas_analysis:
+            pn.business_interpretation = strip_causal_sentences(pn.business_interpretation)
+            pn.operational_impact = strip_causal_sentences(pn.operational_impact)
+    except Exception as e:
+        print(f"[ReportGenerator] causal sentence stripping skipped: {e}")
+
+
 def _correct_narrative_group_counts(narrative: "ReportNarrative", actual_count: int) -> None:
     """Set every stated persona count in the prose to the number actually rendered.
 
@@ -2060,6 +2153,11 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
         # contain is dropped rather than shown to the user as analysis.
         if personas_data and all(p.get('dataset_mode') == 'GENERIC' for p in personas_data):
             _sanitize_generic_narrative(result)
+        # Applies to every dataset, and for the same reason the group count does: the prompt
+        # already forbids stating why anyone left, in capitals, and a real report still said
+        # "một thay đổi cụ thể ... đã dẫn đến quyết định rời mạng". A rule in a prompt is a
+        # request. Sentences admitting the cause is unknown are deliberately kept.
+        _strip_causal_narrative(result)
         # Applies to EVERY dataset, unlike the sanitiser above: the model states how many
         # personas it is describing, and has no way to know. A real report said "xác định ba
         # chân dung chính" and "Ba nhóm khách hàng ... được phân tích" directly above a table
