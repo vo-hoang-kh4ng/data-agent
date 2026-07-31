@@ -117,3 +117,48 @@ def collect_matching_metadata(search_dir: str, active_columns: Sequence[str] | N
         blocks.append(f"\n--- Metadata từ file: {os.path.basename(path)} ---\n{raw}\n")
 
     return "".join(blocks)
+
+
+def labels_for_columns(search_dir: str, active_columns: Sequence[str] | None) -> dict[str, str]:
+    """Human labels for the active dataset's columns, from a dictionary that describes it.
+
+    Persona names used to read "Nhóm no_fee_all_period cao" — a column name shown to a
+    business owner. The naming code has always accepted a column -> label map; nothing ever
+    supplied one, so the raw-name fallback WAS the behaviour.
+
+    Gated exactly like :func:`collect_matching_metadata`, and for the same reason: a label
+    map from another export is worse than none, because it silently renames whichever
+    columns happen to share a name. Columns with no usable label are absent from the map
+    rather than mapped to "" — the caller falls back to the column name, and a blank label
+    would produce a blank persona name.
+
+    Args:
+        search_dir: Directory to scan for ``*metadata*.json`` (non-recursive).
+        active_columns: Columns of the active dataset, or None if unknown.
+
+    Returns:
+        {column: label}; empty when no dictionary describes this dataset. Never raises.
+    """
+    if not active_columns:
+        return {}
+
+    labels: dict[str, str] = {}
+    for path in sorted(glob.glob(os.path.join(search_dir, "*metadata*.json"))):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not describes_active_dataset(parsed, active_columns):
+            continue
+        entries = parsed.get("columns") if isinstance(parsed, dict) else parsed
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            column = entry.get("column") or entry.get("name")
+            label = entry.get("label")
+            if isinstance(column, str) and isinstance(label, str) and label.strip():
+                labels.setdefault(column, label.strip())
+    return labels

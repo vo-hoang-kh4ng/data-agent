@@ -116,6 +116,7 @@ def name_by_top_feature(
     global_means: dict,
     labels: dict[str, str] | None = None,
     means_key: str = "feature_means",
+    binary_features: set[str] | None = None,
 ) -> list[str | None]:
     """Name each persona after the feature that most separates it, avoiding collisions.
 
@@ -133,12 +134,16 @@ def name_by_top_feature(
         labels: Optional column -> human label. Defaults to the raw column name, which the
             report layer may later upgrade.
         means_key: Key holding each persona's per-feature means.
+        binary_features: Columns that are 0/1 flags. Their cluster mean is a SHARE, not a
+            level, so they are phrased differently — see :func:`_name_from`. Omit it and
+            the phrasing is unchanged, so a caller that cannot tell flags apart is safe.
 
     Returns:
         Names positionally aligned with ``personas``; None where no feature deviates enough
         to be worth naming, so the caller keeps whatever it already had.
     """
     labels = labels or {}
+    flags = binary_features or set()
     ranked: list[list[dict]] = []
     for p in personas:
         means = p.get(means_key) or {}
@@ -159,6 +164,11 @@ def name_by_top_feature(
             dev = t.get("deviation")
             if dev is None or abs(float(dev)) < _MIN_NAMING_DEVIATION:
                 continue
+            # A flag deviating DOWNWARD describes what the group does not have, which fits
+            # almost every group and distinguishes none — "Nhóm high_spender thấp" named a
+            # cluster after a property it lacked. Skip to the next-strongest feature.
+            if str(t.get("feature")) in flags and float(dev) < 0:
+                continue
             if str(t.get("feature")) not in claimed:
                 chosen = t
                 break
@@ -166,10 +176,25 @@ def name_by_top_feature(
         if chosen is None:
             continue
         claimed.add(str(chosen.get("feature")))
-        label = chosen.get("label") or chosen.get("feature")
-        direction = "cao" if float(chosen.get("deviation") or 0) >= 0 else "thấp"
-        names[i] = f"Nhóm {_lower_first(str(label))} {direction}"
+        names[i] = _name_from(chosen, flags)
     return names
+
+
+def _name_from(top: dict, flags: set[str]) -> str:
+    """Phrase a persona name from its defining feature.
+
+    A flag is a SHARE, not a level: the cluster mean of ``no_fee_all_period`` is the
+    fraction of the group with no billing, so "Nhóm không phát sinh cước trong suốt kỳ cao"
+    reads as a high quantity of something defined by its absence. The group simply IS the
+    one that flag describes, so it takes the flag's words and no direction at all.
+
+    A continuous feature keeps its direction — a standard deviation really can be high.
+    """
+    label = _lower_first(str(top.get("label") or top.get("feature")))
+    if str(top.get("feature")) in flags:
+        return f"Nhóm {label}"
+    direction = "cao" if float(top.get("deviation") or 0) >= 0 else "thấp"
+    return f"Nhóm {label} {direction}"
 
 
 def _top_features(means: dict, global_means: dict, labels: dict, top_n: int = 3) -> list[dict]:

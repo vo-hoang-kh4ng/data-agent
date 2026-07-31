@@ -18,6 +18,7 @@ instructions the model may reorder, skip or half-apply.
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections import Counter
 from typing import Any
@@ -357,6 +358,28 @@ def resolve_missing(
     return out, report
 
 
+def binary_features(data: pd.DataFrame, feats: list[str]) -> set[str]:
+    """Which of ``feats`` are 0/1 flags rather than measured quantities.
+
+    A flag's cluster mean is a SHARE — the fraction of the group carrying it — so it must
+    not be described as "cao" or "thấp" like a level. Detected from the values rather than
+    the name: ``no_``-prefixed columns are the obvious flags on this export, but
+    ``high_spender`` and ``ever_downtrend`` are flags too and carry no such prefix.
+
+    Returns:
+        Columns holding only 0 and 1, both present. A constant column is not a flag; it
+        distinguishes nothing and is already dropped as near-constant.
+    """
+    flags = set()
+    for column in feats:
+        if column not in data.columns:
+            continue
+        values = pd.to_numeric(data[column], errors="coerce").dropna().unique()
+        if len(values) == 2 and set(values) <= {0, 1}:
+            flags.add(str(column))
+    return flags
+
+
 def cohort_mix(statuses: pd.Series) -> dict[str, float]:
     """Measure the share of each outcome present in ``statuses``.
 
@@ -585,6 +608,7 @@ def run_persona_pipeline(
     cluster_col: str = "cluster",
     status_col: str | None = None,
     active_status_values: set[str] | None = None,
+    label_dir: str | None = None,
 ) -> list[dict[str, Any]]:
     """Cluster ``data`` and return the persona dicts the report layer consumes.
 
@@ -604,6 +628,9 @@ def run_persona_pipeline(
         active_status_values: Which values of ``status_col`` mean the row is still a
             customer. Supplied by the caller because the pipeline has no way to know —
             without it the still-active share stays unstated rather than reported as zero.
+        label_dir: Directory to search for a data dictionary supplying human column
+            labels for the persona names. Defaults to the working directory. The
+            dictionary must pass the same schema gate as metadata injection.
 
     Returns:
         A list of persona dicts. On a genuinely unsplittable dataset, a single persona
@@ -686,6 +713,20 @@ def run_persona_pipeline(
     window_caveat = time_window_caveat(feats)
     if window_caveat:
         print(f"[PIPELINE] {window_caveat}")
+
+    # Human labels for the persona names, from a data dictionary that provably describes
+    # THIS dataset. Without them the naming code falls back to the column name, which is
+    # how a business owner was shown "Nhóm no_fee_all_period cao".
+    flag_feats = binary_features(data, feats)
+    column_labels: dict[str, str] = {}
+    try:
+        from api.services.metadata_gate import labels_for_columns
+
+        column_labels = labels_for_columns(label_dir or os.getcwd(), list(data.columns))
+        if column_labels:
+            print(f"[PIPELINE] nhãn nghiệp vụ cho {len(column_labels)} cột, dùng để đặt tên nhóm")
+    except Exception as e:  # a dictionary problem must not take the run down
+        print(f"[PIPELINE] không nạp được nhãn cột (bỏ qua): {e}")
 
     best_k, best_sil, labels = choose_k(X)
     data[cluster_col] = labels
@@ -797,7 +838,8 @@ def run_persona_pipeline(
     # identical names. Anomalies keep their own label, and the report may still upgrade a raw
     # column name to a human one.
     if mode == "GENERIC":
-        generic_names = name_by_top_feature(personas, global_mean)
+        generic_names = name_by_top_feature(personas, global_mean, labels=column_labels,
+                                            binary_features=flag_feats)
         for p, new_name in zip(personas, generic_names):
             if p["is_anomaly"]:
                 continue
@@ -825,7 +867,9 @@ def run_persona_pipeline(
         unsignalled = [p for p in personas
                        if not p["is_anomaly"] and p.get("churn_driver") == NO_STANDOUT_SIGNAL]
         if len(unsignalled) > 1:
-            for p, new_name in zip(unsignalled, name_by_top_feature(unsignalled, global_mean)):
+            renamed = name_by_top_feature(unsignalled, global_mean, labels=column_labels,
+                                          binary_features=flag_feats)
+            for p, new_name in zip(unsignalled, renamed):
                 if new_name:
                     p["persona_name"] = new_name
                     p["sample_persona_text"] = _sample_persona_text(

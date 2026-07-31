@@ -102,6 +102,55 @@ _NAME_HEADERS = ("cot", "Cột", "column", "Column")
 _DESCRIPTION_HEADERS = ("mo_ta_suy_doan_cua_may", "Mô tả", "mo_ta", "description")
 
 
+#: Tiền tố cho biết cột được MÃ HOÁ thế nào, không cho biết nó ĐO gì.
+_ENCODING_PREFIX = re.compile(r"^\s*cờ\s*:?\s*", re.IGNORECASE)
+#: Nhãn dài hơn mức này bị cắt ở ranh giới từ — nó sẽ nằm trong tên persona.
+_MAX_LABEL_CHARS = 60
+
+
+def short_label(description: str | None) -> str:
+    """Rút một nhãn ngắn, đọc được từ mô tả cột, để đặt tên persona.
+
+    Báo cáo thật đặt tên nhóm là "Nhóm no_fee_all_period cao" — người đọc là chủ sở hữu
+    nghiệp vụ, không phải người viết ETL. Nghiệp vụ đã xác nhận 52 mô tả, nhưng đó là CÂU
+    chứ không phải TÊN ("Cờ: không phát sinh cước trong suốt kỳ."), nên phải rút gọn.
+
+    Ba thứ bị bỏ đi:
+
+    * tiền tố "Cờ:" — nói cột được mã hoá thế nào, không nói nó đo gì
+    * mọi mệnh đề sau dấu chấm/phẩy đầu tiên — tên chỉ cần mệnh đề đầu
+    * các cảnh báo người soát viết HOA ("NGƯỠNG PHÂN LOẠI CHƯA RÕ") — chúng thuộc về phần
+      mô tả, không thuộc về tên một nhóm khách hàng
+
+    Returns:
+        Nhãn ngắn viết thường (giữ nguyên chữ viết tắt toàn hoa), hoặc "" khi không rút
+        được gì — khi đó phía gọi giữ lại tên cột, thà thế còn hơn một nhãn trống.
+    """
+    if not description:
+        return ""
+
+    text = _ENCODING_PREFIX.sub("", str(description).strip())
+    # Câu viết HOA hoàn toàn là ghi chú của người soát, không phải mô tả.
+    kept = [
+        s for s in re.split(r"(?<=[.;])\s+", text)
+        if s.strip() and not (s.strip().rstrip(".;") == s.strip().rstrip(".;").upper()
+                              and len(s.strip()) > 12)
+    ]
+    text = kept[0] if kept else ""
+    text = re.split(r"[.,;]", text)[0].strip()
+    if not text:
+        return ""
+
+    if len(text) > _MAX_LABEL_CHARS:
+        cut = text[:_MAX_LABEL_CHARS].rsplit(" ", 1)[0].rstrip()
+        text = f"{cut}…"
+
+    first = text.split(maxsplit=1)[0]
+    if len(first) > 1 and first.isupper():
+        return text
+    return text[0].lower() + text[1:]
+
+
 def infer(column: str) -> tuple[str, str, str]:
     """Trả (nhóm, mô tả suy đoán, độ tin cậy) cho một tên cột."""
     for pattern, group, description, confidence in NAMING_RULES:
@@ -210,6 +259,7 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
             "type": str(series.dtype),
             "sample": sample,
             "description": description,
+            "label": short_label(description),
             "group": group,
             "confirmed": is_confirmed,
         })
