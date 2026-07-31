@@ -17,6 +17,8 @@ instructions the model may reorder, skip or half-apply.
 """
 from __future__ import annotations
 
+import math
+import re
 from collections import Counter
 from typing import Any
 
@@ -60,6 +62,15 @@ _MAX_ZERO_FRACTION = 0.99
 #: filler. See resolve_missing(); a column the data owner has confirmed is event-recorded
 #: is exempt, because there a gap is a real zero rather than a missing measurement.
 _MAX_ABSENT_FRACTION = 0.5
+
+#: Share the commonest value may occupy before a column is dropped as near-constant. See
+#: is_near_constant() — the line sits at a 0.5% minority, which on the real export removes
+#: the columns differing on 2, 157 and 297 rows while keeping the one differing on 567.
+_MAX_MODAL_FRACTION = 0.995
+
+#: Absolute correlation at which two columns are treated as the same measurement, and the
+#: group is down-weighted so it votes once. See redundancy_weights().
+_REDUNDANCY_THRESHOLD = 0.95
 
 #: Name for a GENERIC cluster that deviates on nothing. States what was measured and
 #: assumes nothing about what the dataset describes.
@@ -238,6 +249,32 @@ def _is_row_identifier(series: pd.Series) -> bool:
     return bool((values % 1 == 0).all())
 
 
+def is_near_constant(series: pd.Series, max_modal: float = _MAX_MODAL_FRACTION) -> bool:
+    """True when too few rows differ from the commonest value to describe a group.
+
+    Rejecting only single-valued columns left the ones that are constant in every practical
+    sense. On the 62,467-row Churn_VT export ``persistent_cl`` differs on TWO rows. Two rows
+    cannot form a cluster; what the column does instead is reach StandardScaler with a
+    standard deviation near zero, which lifts each differing row to a z-score around +170 —
+    an outlier the nearest centroid chases across an axis carrying no partition at all.
+
+    The test is on the MINORITY share rather than the count, because whether enough rows
+    differ to describe a group is relative to the dataset. Columns with a rare but real
+    signal survive: ``HTKT_CHECKLIST_202604`` differs on 567 rows (0.91%) and is kept.
+
+    Args:
+        series: One candidate feature.
+        max_modal: Share the commonest value may occupy before the column is rejected.
+
+    Returns:
+        Whether the column should be kept out of the feature matrix.
+    """
+    values = series.dropna()
+    if len(values) == 0:
+        return True
+    return bool(float(values.value_counts(normalize=True).iloc[0]) > max_modal)
+
+
 def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | None = None) -> list[str]:
     """Every numeric column that actually varies — the pipeline's own deterministic choice.
 
@@ -247,14 +284,22 @@ def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | Non
     """
     numeric = data.select_dtypes(include="number")
     excluded = set(exclude or ())
-    feats, identifiers = [], []
+    feats, identifiers, flat = [], [], []
     for c in numeric.columns:
-        if c == cluster_col or c in excluded or numeric[c].nunique(dropna=True) <= 1:
+        if c == cluster_col or c in excluded:
             continue
-        (identifiers if _is_row_identifier(numeric[c]) else feats).append(c)
+        if is_near_constant(numeric[c]):
+            flat.append(str(c))
+        elif _is_row_identifier(numeric[c]):
+            identifiers.append(str(c))
+        else:
+            feats.append(c)
     if identifiers:
         print(f"[PIPELINE] bỏ {len(identifiers)} cột định danh khỏi feature: "
               + ", ".join(identifiers))
+    if flat:
+        print(f"[PIPELINE] bỏ {len(flat)} cột gần như hằng số khỏi feature: "
+              + ", ".join(flat))
     return feats
 
 
@@ -337,6 +382,133 @@ def cohort_mix(statuses: pd.Series) -> dict[str, float]:
     return {str(k): float(v) for k, v in labelled.value_counts(normalize=True).items()}
 
 
+#: Suffixes the exports already use to declare an observation period. Matched at the end of
+#: a column name only, so `total_negative_202601` is read as a month rather than as "1 day".
+_WINDOW_PATTERNS = (
+    (re.compile(r"_(\d{6})$"), None),          # YYYYMM — one specific month
+    (re.compile(r"_(\d+)m$", re.I), "{} tháng"),
+    (re.compile(r"_(\d+)d$", re.I), "{} ngày"),
+)
+_SPECIFIC_MONTH = "tháng cụ thể"
+
+
+def declared_time_windows(columns) -> dict[str, list[str]]:
+    """Group column names by the observation period their own naming declares.
+
+    Only what the name SAYS counts. ``fee_total`` really does cover four months on the
+    Churn_VT export, but nothing in the name says so, and inferring it is how a report ends
+    up asserting a period nobody wrote down.
+
+    Args:
+        columns: Column names.
+
+    Returns:
+        {window label: columns}, in first-seen order; {} when nothing declares a period.
+    """
+    windows: dict[str, list[str]] = {}
+    for column in columns:
+        name = str(column)
+        for pattern, template in _WINDOW_PATTERNS:
+            match = pattern.search(name)
+            if not match:
+                continue
+            label = _SPECIFIC_MONTH if template is None else template.format(match.group(1))
+            windows.setdefault(label, []).append(name)
+            break
+    return windows
+
+
+def time_window_caveat(columns) -> str:
+    """State that features covering different periods share one distance computation.
+
+    Euclidean distance treats every axis as commensurable, so a 6-month complaint count and
+    a 30-day call count are compared as though they spanned the same time. Nothing in the
+    data can fix that. What can be fixed is a report presenting the result as though the
+    question never came up, so this says it — and says only that. Nothing is rescaled.
+
+    Returns:
+        A sentence for the reader, or "" when at most one period is declared.
+    """
+    windows = declared_time_windows(columns)
+    if len(windows) < 2:
+        return ""
+    spans = ", ".join(f"{label} ({len(cols)} cột)" for label, cols in windows.items())
+    return (
+        f"Các feature khai báo nhiều kỳ quan sát khác nhau: {spans}. Phép phân cụm đo "
+        f"khoảng cách trên mọi cột như nhau, nên các chỉ số này được so sánh như thể cùng "
+        f"một kỳ. Số liệu giữ nguyên theo kỳ gốc của từng cột."
+    )
+
+
+def correlation_groups(frame: pd.DataFrame, threshold: float = _REDUNDANCY_THRESHOLD) -> list[list[str]]:
+    """Partition ``frame``'s columns into groups that measure the same thing.
+
+    Two columns join the same group when ``|r| >= threshold``, transitively — the relation
+    is treated as connected components, so a chain a~b~c lands together even if a and c fall
+    just short of each other. On the real export this recovers exactly the families a reader
+    would name by eye: the four fee columns, the four technical-fault columns, and so on.
+
+    Anti-correlation counts: ``no_cl_all_period`` is ``active_cl_months`` negated, which is
+    one measurement written twice, not two findings.
+
+    Args:
+        frame: Numeric frame, one column per feature.
+        threshold: Absolute correlation at which two columns are the same measurement.
+
+    Returns:
+        Groups in column order; every column appears in exactly one, singletons included.
+    """
+    columns = list(frame.columns)
+    if not columns:
+        return []
+
+    # A constant column correlates with nothing — corr() yields NaN, which must not be read
+    # as agreement. Filling with 0 keeps it in a group of its own.
+    corr = frame.corr().abs().fillna(0.0)
+
+    parent = {c: c for c in columns}
+
+    def find(c):
+        while parent[c] != c:
+            parent[c] = parent[parent[c]]
+            c = parent[c]
+        return c
+
+    for i, a in enumerate(columns):
+        for b in columns[i + 1:]:
+            if corr.loc[a, b] >= threshold:
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    parent[rb] = ra
+
+    grouped: dict[str, list[str]] = {}
+    for c in columns:
+        grouped.setdefault(find(c), []).append(c)
+    return list(grouped.values())
+
+
+def redundancy_weights(frame: pd.DataFrame, threshold: float = _REDUNDANCY_THRESHOLD) -> dict[str, float]:
+    """How much each column may count for, given how often its measurement is repeated.
+
+    KMeans weights by column count: m standardised copies of one measurement contribute m
+    times the squared distance of a domain represented once. Scaling each member of a group
+    of m by ``1/sqrt(m)`` makes the group contribute exactly one column's worth, while every
+    column keeps its own values and its own direction.
+
+    Dropping all but one member would do the same to the distance and lose the temporal
+    signal: fee_old and fee_recent correlate at 0.95, and their DIFFERENCE is what the
+    POST_CHURN path reads.
+
+    Returns:
+        {column: weight}, every weight strictly positive.
+    """
+    return {
+        column: 1.0 / math.sqrt(len(group))
+        for group in correlation_groups(frame, threshold)
+        for column in group
+    }
+
+
 def _prepare_matrix(data: pd.DataFrame, feats: list[str], absent_means_zero: set[str] | None = None):
     """Coerce ``feats`` to a scaled matrix, or None if the set cannot be clustered on.
 
@@ -357,7 +529,18 @@ def _prepare_matrix(data: pd.DataFrame, feats: list[str], absent_means_zero: set
         return None
     if float((raw == 0).to_numpy().mean()) > _MAX_ZERO_FRACTION:
         return None
-    return raw, StandardScaler().fit_transform(raw.to_numpy(dtype=float))
+
+    X = StandardScaler().fit_transform(raw.to_numpy(dtype=float))
+
+    # Stop one measurement written down four times from outvoting one written once. Applied
+    # to the SCALED matrix only: `raw` feeds every reported mean and deviation, and those
+    # have to stay in the units a reader recognises.
+    weights = redundancy_weights(raw)
+    groups = [g for g in correlation_groups(raw) if len(g) > 1]
+    if groups:
+        print(f"[PIPELINE] {len(groups)} nhóm feature trùng đo, hạ trọng số: "
+              + "; ".join("+".join(g) for g in groups))
+    return raw, X * np.array([weights[c] for c in raw.columns])
 
 
 def _failed_persona(data: pd.DataFrame, reason: str) -> list[dict]:
@@ -500,6 +683,10 @@ def run_persona_pipeline(
     # next line died with KeyError: 'LLSD_202606'.
     feats = list(X_raw.columns)
 
+    window_caveat = time_window_caveat(feats)
+    if window_caveat:
+        print(f"[PIPELINE] {window_caveat}")
+
     best_k, best_sil, labels = choose_k(X)
     data[cluster_col] = labels
 
@@ -590,6 +777,7 @@ def run_persona_pipeline(
             "risk_tier": classify_risk_tier(meta, profile),
             "cohort_mix": mix_by_cluster.get(cid, {}),
             "active_pct": active_by_cluster.get(cid),
+            "time_window_caveat": window_caveat,
             "is_anomaly": is_anomaly,
             "segmentation_quality": quality,
             # "caller" = the feature list supplied to this call was used; "auto" = the

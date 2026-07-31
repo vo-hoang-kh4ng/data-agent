@@ -2341,6 +2341,19 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
         
         # Appendix
         md += "## Appendix\n\n"
+
+        # Stated where a reader will actually meet it. The pipeline detects that features
+        # declaring different observation periods (4 tháng, 6 tháng, 30/60/90 ngày, tháng
+        # cụ thể) share one distance computation; printing that only to the pipeline log
+        # leaves the report presenting the segmentation as though the question never arose.
+        # Read off the first persona: it describes the run, not any one cluster.
+        caveat = next(
+            (p.get('time_window_caveat') for p in personas_data if p.get('time_window_caveat')),
+            '',
+        )
+        if caveat:
+            md += f"### Giới hạn dữ liệu\n{caveat}\n\n"
+
         md += "### Cluster Feature Statistics\n"
         
         for p in personas_data:
