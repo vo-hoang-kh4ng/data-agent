@@ -58,6 +58,12 @@ export interface Persona {
   recommended_actions?: string[];
   domain_signature?: Record<string, { stars: number; top_features: [string, number, number][] }>;
   churn_driver?: string;
+  /** Measured share of each outcome inside this persona's cluster; {} when the dataset
+   *  carries no status column. Never inferred — see pipeline.cohort_mix. */
+  cohort_mix?: Record<string, number>;
+  /** Measured share still a customer, or null/undefined when nobody named which status
+   *  values mean "active". Absent is NOT the same as zero. */
+  active_pct?: number | null;
 }
 
 interface PersonaDashboardProps {
@@ -93,6 +99,26 @@ export function PersonaDashboard({ data }: PersonaDashboardProps) {
   // KPI tile reads as an alarming, out-of-context metric. Detect via churn_driver (only ever set
   // for POST_CHURN mode) and relabel the tile instead of treating it as future-risk framing.
   const isPostChurnDataset = actualData.some((item) => Boolean((item as any).churn_driver));
+
+  // The tile used to print a hardcoded "100% — Toàn bộ mẫu đã rời mạng" for every
+  // POST_CHURN dataset. Nothing counted that 100%: it followed from one persona having a
+  // churn_driver. On the 62,467-row Churn_VT export it was wrong by 4,533 subscribers who
+  // had restored service — 92.7%, not 100%. When the pipeline was given a status column it
+  // now reports what it MEASURED, weighted by cluster size; with no status column we say
+  // the proportion is unknown rather than invent one.
+  const cohortTotals = actualData.reduce<Record<string, number>>((acc, item) => {
+    const mix = item.cohort_mix;
+    if (!mix) return acc;
+    const support = safeNum(item.support);
+    for (const [status, share] of Object.entries(mix)) {
+      acc[status] = (acc[status] ?? 0) + safeNum(share) * support;
+    }
+    return acc;
+  }, {});
+  const cohortMeasured = Object.values(cohortTotals).reduce((a, b) => a + b, 0);
+  const cohortShares = Object.entries(cohortTotals)
+    .map(([status, weight]) => [status, weight / cohortMeasured] as const)
+    .sort((a, b) => b[1] - a[1]);
 
   // Calculate Revenue at Risk
   const chartData = actualData.map((item) => {
@@ -160,10 +186,19 @@ export function PersonaDashboard({ data }: PersonaDashboardProps) {
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {isPostChurnDataset ? (
+            {cohortMeasured > 0 ? (
               <>
-                <div className="text-2xl font-bold">100%</div>
-                <p className="text-xs text-muted-foreground">Toàn bộ mẫu đã rời mạng (không áp dụng dự báo rủi ro)</p>
+                <div className="text-2xl font-bold">{formatPercent(cohortShares[0][1])}</div>
+                <p className="text-xs text-muted-foreground">
+                  {cohortShares.map(([status, share]) => `${status} ${formatPercent(share)}`).join(" · ")}
+                </p>
+              </>
+            ) : isPostChurnDataset ? (
+              <>
+                <div className="text-2xl font-bold">—</div>
+                <p className="text-xs text-muted-foreground">
+                  Dữ liệu mang dấu hiệu sau rời mạng; tỉ lệ chưa đo được vì không có cột trạng thái
+                </p>
               </>
             ) : (
               <>

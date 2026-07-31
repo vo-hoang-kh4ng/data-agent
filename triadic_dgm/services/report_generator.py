@@ -544,13 +544,21 @@ def should_offer_retention(persona: dict) -> bool:
     The scripts stay correct for the ACTIVE base showing the same behaviour; they just do
     not belong in a post-mortem.
 
+    Unless the cohort was actually counted and some of it is still here. "Churned" was
+    never measured — the dashboard asserted 100% from the mere presence of a churn_driver,
+    and on the Churn_VT export that was wrong by 4,533 subscribers who had restored
+    service. Suppressing the script for them silenced it for the only readers it fits. So a
+    MEASURED still-active share reopens the question; an unmeasured one keeps the cautious
+    default, because not knowing is not permission.
+
     Args:
         persona: One persona dict from the pipeline.
 
     Returns:
         Whether to render the retention block.
     """
-    if persona.get('churn_driver'):
+    active_pct = persona.get('active_pct')
+    if persona.get('churn_driver') and not (active_pct and active_pct > 0):
         return False
     risk_tier = persona.get('risk_tier') or ''
     return ("giữ chân" in risk_tier

@@ -55,6 +55,12 @@ _STAGE2_TRIGGER = 0.5
 #: real failure mode.
 _MAX_ZERO_FRACTION = 0.99
 
+#: Share of absent values above which an UNDECLARED column is dropped rather than imputed.
+#: Past half a column, no statistic is describing the data any more — it is describing the
+#: filler. See resolve_missing(); a column the data owner has confirmed is event-recorded
+#: is exempt, because there a gap is a real zero rather than a missing measurement.
+_MAX_ABSENT_FRACTION = 0.5
+
 #: Name for a GENERIC cluster that deviates on nothing. States what was measured and
 #: assumes nothing about what the dataset describes.
 _NEAR_MEAN_NAME = "Nhóm gần trung bình toàn tập"
@@ -232,12 +238,18 @@ def _is_row_identifier(series: pd.Series) -> bool:
     return bool((values % 1 == 0).all())
 
 
-def _auto_features(data: pd.DataFrame, cluster_col: str) -> list[str]:
-    """Every numeric column that actually varies — the pipeline's own deterministic choice."""
+def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | None = None) -> list[str]:
+    """Every numeric column that actually varies — the pipeline's own deterministic choice.
+
+    ``exclude`` holds columns that describe the OUTCOME rather than the behaviour. Cluster
+    on those and the segmentation is partly a restatement of the answer, which the report
+    then presents as a finding about the customers.
+    """
     numeric = data.select_dtypes(include="number")
+    excluded = set(exclude or ())
     feats, identifiers = [], []
     for c in numeric.columns:
-        if c == cluster_col or numeric[c].nunique(dropna=True) <= 1:
+        if c == cluster_col or c in excluded or numeric[c].nunique(dropna=True) <= 1:
             continue
         (identifiers if _is_row_identifier(numeric[c]) else feats).append(c)
     if identifiers:
@@ -246,15 +258,103 @@ def _auto_features(data: pd.DataFrame, cluster_col: str) -> list[str]:
     return feats
 
 
-def _prepare_matrix(data: pd.DataFrame, feats: list[str]):
+def resolve_missing(
+    raw: pd.DataFrame,
+    absent_means_zero: set[str] | None = None,
+    max_absent: float = _MAX_ABSENT_FRACTION,
+) -> tuple[pd.DataFrame, dict]:
+    """Close the gaps in ``raw`` without inventing measurements, and say what was done.
+
+    The previous behaviour was ``fillna(0.0)`` on everything. Zero is not a neutral filler:
+    for a ratio it is the floor, for a fee it is "spent nothing". On the 62,467-row
+    Churn_VT export ``ratio_missed_30d`` is 98.19% absent and the 1,133 present values
+    average 0.674 — filling with zero handed 61,334 subscribers the assertion "none of your
+    outgoing calls failed", at the far end of the column from every value actually seen.
+
+    Whether an absent cell means "no event occurred" or "nobody measured this" is a fact
+    about the column that the column cannot reveal. So it is declared, not guessed:
+
+    * listed in ``absent_means_zero`` — filled with 0.0, kept however absent it is
+    * absent in more than ``max_absent`` of rows — dropped, because imputing the majority
+      of a column is inventing it whatever statistic is used
+    * otherwise — filled with the median, which shifts the distribution least and stays
+      inside the observed range
+
+    Args:
+        raw: Numeric frame, one column per candidate feature.
+        absent_means_zero: Columns the data owner has confirmed record events, where a gap
+            genuinely means none occurred.
+        max_absent: Share of absent values above which an undeclared column is dropped.
+
+    Returns:
+        (frame with no NaN left, report naming every column dropped, imputed or zeroed).
+    """
+    declared = set(absent_means_zero or ())
+    report: dict = {"dropped": [], "imputed": {}, "zero_filled": []}
+    out = raw.copy()
+
+    for column in raw.columns:
+        absent = float(raw[column].isna().mean())
+        if column in declared:
+            if absent:
+                out[column] = raw[column].fillna(0.0)
+                report["zero_filled"].append(column)
+            continue
+        if not absent:
+            continue
+        if absent > max_absent:
+            out = out.drop(columns=[column])
+            report["dropped"].append(column)
+            continue
+        out[column] = raw[column].fillna(raw[column].median())
+        report["imputed"][column] = "median"
+
+    return out, report
+
+
+def cohort_mix(statuses: pd.Series) -> dict[str, float]:
+    """Measure the share of each outcome present in ``statuses``.
+
+    The dashboard used to print "100% — Toàn bộ mẫu đã rời mạng" whenever ANY persona
+    carried a churn_driver. Nothing counted that 100%, and on the Churn_VT export it was
+    wrong by 4,533 people: the data owner confirmed that rows carrying neither cancellation
+    code are subscribers who restored service, so the cohort is 92.7% departed, not 100%.
+
+    This function only counts. It has no idea which value means "left" and must not
+    acquire one — the caller names the column, and a dataset-specific script is what
+    decides that HSSD means anything at all.
+
+    Args:
+        statuses: One outcome label per row. Unlabelled rows are excluded from the
+            denominator: an absent label is not evidence of any outcome.
+
+    Returns:
+        {label: share}, summing to 1.0, or {} when nothing is labelled.
+    """
+    labelled = statuses.dropna()
+    if labelled.empty:
+        return {}
+    return {str(k): float(v) for k, v in labelled.value_counts(normalize=True).items()}
+
+
+def _prepare_matrix(data: pd.DataFrame, feats: list[str], absent_means_zero: set[str] | None = None):
     """Coerce ``feats`` to a scaled matrix, or None if the set cannot be clustered on.
 
     Returns None rather than raising so a candidate feature set that turns out unusable
-    (too few columns, almost entirely zeros) simply loses the comparison.
+    (too few columns, almost entirely zeros) simply loses the comparison. Dropping the
+    columns nobody measured is one way to end up under that bar, so the length check runs
+    again afterwards.
     """
     if len(feats) < 2:
         return None
-    raw = data[feats].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    numeric = data[feats].apply(pd.to_numeric, errors="coerce")
+    raw, report = resolve_missing(numeric, absent_means_zero)
+    if report["dropped"] or report["imputed"] or report["zero_filled"]:
+        print(f"[PIPELINE] giá trị thiếu: bỏ {len(report['dropped'])} cột "
+              f"({', '.join(report['dropped']) or '—'}), điền trung vị "
+              f"{len(report['imputed'])} cột, điền 0 theo khai báo {len(report['zero_filled'])} cột")
+    if len(raw.columns) < 2:
+        return None
     if float((raw == 0).to_numpy().mean()) > _MAX_ZERO_FRACTION:
         return None
     return raw, StandardScaler().fit_transform(raw.to_numpy(dtype=float))
@@ -300,6 +400,8 @@ def run_persona_pipeline(
     behavioral_features: list[str] | None = None,
     dataset_mode: str | None = None,
     cluster_col: str = "cluster",
+    status_col: str | None = None,
+    active_status_values: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Cluster ``data`` and return the persona dicts the report layer consumes.
 
@@ -312,6 +414,13 @@ def run_persona_pipeline(
             more than one distinct value.
         dataset_mode: Override for :func:`detect_dataset_mode`.
         cluster_col: Name of the cluster-label column to add.
+        status_col: Column holding each row's outcome, if the dataset records one. Each
+            persona then carries the mix actually measured in its cluster, instead of the
+            report asserting a proportion nobody counted. Excluded from clustering:
+            segmenting by the outcome and then describing the segments is circular.
+        active_status_values: Which values of ``status_col`` mean the row is still a
+            customer. Supplied by the caller because the pipeline has no way to know —
+            without it the still-active share stays unstated rather than reported as zero.
 
     Returns:
         A list of persona dicts. On a genuinely unsplittable dataset, a single persona
@@ -343,8 +452,8 @@ def run_persona_pipeline(
             )
 
     mode = dataset_mode or detect_dataset_mode(data.columns)
-    auto_feats = _auto_features(data, cluster_col)
-    caller_feats = list(behavioral_features or [])
+    auto_feats = _auto_features(data, cluster_col, exclude={status_col} if status_col else None)
+    caller_feats = [f for f in (behavioral_features or []) if f != status_col]
 
     # On GENERIC data the pipeline picks the features, not the caller.
     #
@@ -383,6 +492,13 @@ def run_persona_pipeline(
         )
         return _failed_persona(data, f"zero_inflated_{zero_fraction:.3f}")
     X_raw, X = prepared
+
+    # resolve_missing() drops the columns nobody measured, so the surviving matrix is the
+    # authority on which features exist — not the list we asked for. Everything downstream
+    # (global means, hidden drivers, features_used on every persona) indexes X_raw by this
+    # list. Observed on the real 62,467-row export: 16 columns were dropped and the very
+    # next line died with KeyError: 'LLSD_202606'.
+    feats = list(X_raw.columns)
 
     best_k, best_sil, labels = choose_k(X)
     data[cluster_col] = labels
@@ -426,6 +542,20 @@ def run_persona_pipeline(
         base_names[cid] = meta["persona_name"]
     final_names = _dedupe_names(base_names)
 
+    # Measured per cluster, never inferred. An unnamed status column leaves both fields
+    # empty so the report has nothing to state — which is the honest outcome, and the one
+    # the hardcoded "100% đã rời mạng" skipped straight past.
+    mix_by_cluster: dict[Any, dict[str, float]] = {}
+    active_by_cluster: dict[Any, float | None] = {}
+    if status_col and status_col in data.columns:
+        for cid in cluster_sizes:
+            mix = cohort_mix(data.loc[data[cluster_col] == cid, status_col])
+            mix_by_cluster[cid] = mix
+            active_by_cluster[cid] = (
+                float(sum(mix.get(str(v), 0.0) for v in active_status_values))
+                if active_status_values else None
+            )
+
     personas: list[dict[str, Any]] = []
     for cid in sorted(cluster_sizes):
         meta = metadata[cid]
@@ -458,6 +588,8 @@ def run_persona_pipeline(
             "domain_signature": domain_sig.get(cid, {}),
             "profile_attributes": profile,
             "risk_tier": classify_risk_tier(meta, profile),
+            "cohort_mix": mix_by_cluster.get(cid, {}),
+            "active_pct": active_by_cluster.get(cid),
             "is_anomaly": is_anomaly,
             "segmentation_quality": quality,
             # "caller" = the feature list supplied to this call was used; "auto" = the

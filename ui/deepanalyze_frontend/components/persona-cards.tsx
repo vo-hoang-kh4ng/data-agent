@@ -439,8 +439,12 @@ export function PersonaCards({ data }: PersonaCardsProps) {
               // resolution is addressed to somebody the company no longer has. Mirrors
               // should_offer_retention() in triadic_dgm/services/report_generator.py — the
               // report and this panel must not disagree about who is still reachable.
+              // A MEASURED still-active share reopens it: "churned" was never counted, and
+              // on Churn_VT the assumed 100% was wrong by 4,533 restored subscribers — the
+              // only readers these scripts fit. An unmeasured share keeps the default.
+              const stillReachable = typeof p.active_pct === "number" && p.active_pct > 0;
               const scripts =
-                !p.churn_driver &&
+                (!p.churn_driver || stillReachable) &&
                 (p.risk_tier?.includes("giữ chân") || p.severity === "HIGH" || p.severity === "EXTREME" || p.risk === "HIGH" || p.risk === "EXTREME")
                   ? attachRecommendedScripts(p)
                   : [];
