@@ -276,6 +276,47 @@ def is_near_constant(series: pd.Series, max_modal: float = _MAX_MODAL_FRACTION) 
     return bool(float(values.value_counts(normalize=True).iloc[0]) > max_modal)
 
 
+def usable_features(data: pd.DataFrame, feats, absent_means_zero: set[str] | None = None
+                    ) -> tuple[list[str], dict[str, str]]:
+    """Filter ``feats`` down to the columns that can carry a segmentation, and say what went.
+
+    The same three refusals :func:`_auto_features` makes, applied to ANY feature list. That
+    is the whole point: the guards used to live only in the auto-selection branch, which
+    runs only when the caller names nothing — and in production the caller is an LLM that
+    always names something. A real report consequently characterised a 3,816-customer
+    persona entirely by ``ratio_missed_30d`` (+1522%), a column absent from 98.19% of rows,
+    and listed ``persistent_cl`` (which differs on two rows of 62,467) as a business signal.
+
+    Args:
+        data: The dataset.
+        feats: Candidate feature names, in the caller's order.
+        absent_means_zero: Columns whose blanks are declared zeros; judged on the values as
+            they will be used, so a sparse event flag is not mistaken for a constant.
+
+    Returns:
+        (kept in the given order, {dropped column: reason}).
+    """
+    declared = set(absent_means_zero or ())
+    kept: list[str] = []
+    dropped: dict[str, str] = {}
+    for column in feats:
+        if column not in data.columns:
+            dropped[str(column)] = "không tồn tại"
+            continue
+        series = data[column]
+        if not pd.api.types.is_numeric_dtype(series):
+            dropped[str(column)] = "không phải kiểu số"
+            continue
+        if is_near_constant(series.fillna(0.0) if column in declared else series):
+            dropped[str(column)] = "gần như hằng số"
+            continue
+        if _is_row_identifier(series):
+            dropped[str(column)] = "định danh"
+            continue
+        kept.append(column)
+    return kept, dropped
+
+
 def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | None = None,
                    absent_means_zero: set[str] | None = None) -> list[str]:
     """Every numeric column that actually varies — the pipeline's own deterministic choice.
@@ -715,6 +756,15 @@ def run_persona_pipeline(
     else:
         feats = caller_feats or auto_feats
         feature_selection = "caller" if caller_feats else "auto"
+
+    # Applied to WHATEVER feature set won above, not only the auto-selected one. Living
+    # inside _auto_features meant the guards ran only when the caller named nothing, and in
+    # production the caller always names something — so the path that actually runs was the
+    # unprotected one. Auto-selection has already filtered; this is a no-op for it.
+    feats, refused = usable_features(data, feats, absent_means_zero=absent_zero)
+    if refused:
+        print("[PIPELINE] bỏ khỏi feature do caller đề xuất: "
+              + ", ".join(f"{c} ({why})" for c, why in refused.items()))
 
     if len(feats) < 2:
         return _failed_persona(data, "insufficient_numeric_features")

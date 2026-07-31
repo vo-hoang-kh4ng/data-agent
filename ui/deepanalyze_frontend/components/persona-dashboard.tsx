@@ -94,6 +94,21 @@ export function PersonaDashboard({ data }: PersonaDashboardProps) {
   const safeNum = (v: unknown): number => (typeof v === "number" && isFinite(v) ? v : 0);
   const hasChurnData = actualData.some((item) => typeof item.churn_rate === "number" && isFinite(item.churn_rate));
   const hasRevenueData = actualData.some((item) => typeof item.arpu === "number" && isFinite(item.arpu) && item.arpu > 0);
+
+  // The tile printed "N/A — Không có dữ liệu ARPU" while every persona card below it showed
+  // "Cước phí trung bình: 198.932". Both were right about their own field: revenue-at-risk
+  // needs `arpu`, which the POST_CHURN path never sets, while the fee lives in
+  // profile_attributes.avg_fee. Rather than claim the fee is missing, report the fee — and
+  // do not call it revenue at risk, because a cohort that has already left puts none at risk.
+  const feeWeighted = actualData.reduce(
+    (acc, item) => {
+      const fee = safeNum((item as any).profile_attributes?.avg_fee);
+      const support = safeNum(item.support);
+      return fee > 0 ? { total: acc.total + fee * support, weight: acc.weight + support } : acc;
+    },
+    { total: 0, weight: 0 },
+  );
+  const avgFee = feeWeighted.weight > 0 ? feeWeighted.total / feeWeighted.weight : 0;
   // POST_CHURN datasets: every persona is already-churned by definition, so churn_rate=1.0 (100%)
   // for all of them is CORRECT data, not a bug — but showing a bare "100%" in a "Weighted average"
   // KPI tile reads as an alarming, out-of-context metric. Detect via churn_driver (only ever set
@@ -210,12 +225,22 @@ export function PersonaDashboard({ data }: PersonaDashboardProps) {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">{hasRevenueData ? "Total Revenue at Risk" : "Revenue Data"}</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {hasRevenueData ? "Total Revenue at Risk" : avgFee > 0 ? "Cước phí trung bình" : "Revenue Data"}
+            </CardTitle>
             <Coins className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-500">{hasRevenueData ? formatCurrency(totalRevenueAtRisk) : "N/A"}</div>
-            <p className="text-xs text-muted-foreground">{hasRevenueData ? "Monthly estimated" : "Không có dữ liệu ARPU"}</p>
+            <div className={`text-2xl font-bold ${hasRevenueData ? "text-red-500" : ""}`}>
+              {hasRevenueData ? formatCurrency(totalRevenueAtRisk) : avgFee > 0 ? formatCurrency(avgFee) : "N/A"}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {hasRevenueData
+                ? "Monthly estimated"
+                : avgFee > 0
+                  ? "Bình quân theo quy mô nhóm — không phải doanh thu rủi ro"
+                  : "Không có dữ liệu cước phí"}
+            </p>
           </CardContent>
         </Card>
       </div>

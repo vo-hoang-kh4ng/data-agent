@@ -103,3 +103,56 @@ def test_the_hook_never_raises_on_an_unexpected_narrative_shape():
     from triadic_dgm.services.report_generator import _correct_narrative_group_counts
 
     _correct_narrative_group_counts(object(), 5)  # must not raise
+
+
+# --- the regression this correction introduced --------------------------------------------
+#
+# Shipping the fix above produced a NEW contradiction in the next real report:
+#
+#     "Một nhóm nhỏ tập trung vào sự cố kỹ thuật... Sáu nhóm còn lại chiếm tỷ trọng lớn."
+#
+# One plus six is seven, and the report rendered six personas. The model had written "Năm
+# nhóm còn lại", which was correct — 1 + 5 = 6 — and this function rewrote a right sentence
+# into a wrong one, because it matched every "<number> <noun>" without asking what the
+# number was counting.
+#
+# A count qualified by "còn lại", "khác", "trong đó" or a restrictive clause is about a
+# SUBSET. The total is not the right answer there, and the original defect never involved
+# one. Correcting fewer sentences leaves the model's number, which may be right or wrong;
+# correcting a qualified one guarantees a wrong number. So the qualified ones are skipped.
+
+
+@pytest.mark.parametrize("qualifier", ["còn lại", "khác", "đầu tiên", "cuối cùng"])
+def test_a_count_of_a_subset_is_left_alone(qualifier):
+    text = f"Một nhóm nhỏ tập trung vào sự cố. Năm nhóm {qualifier} chiếm tỷ trọng lớn."
+    assert correct_group_count(text, 6) == text
+
+
+def test_the_exact_sentence_the_report_printed_is_left_alone():
+    text = "Một nhóm nhỏ tập trung vào sự cố kỹ thuật. Năm nhóm còn lại chiếm tỷ trọng lớn."
+    assert correct_group_count(text, 6) == text
+
+
+def test_a_count_restricted_by_what_the_groups_carry_is_left_alone():
+    """"Có 3 nhóm mang tín hiệu hành vi rõ ràng" is a subset of six, not a miscount."""
+    text = "Có 3 nhóm mang tín hiệu hành vi rõ ràng, đủ cụ thể để rà soát tiếp."
+    assert correct_group_count(text, 6) == text
+
+
+def test_a_count_qualified_by_trong_do_is_left_alone():
+    text = "Trong đó ba nhóm có khiếu nại tăng mạnh."
+    assert correct_group_count(text, 6) == text
+
+
+def test_the_original_defect_is_still_corrected():
+    """The guard must not disable the fix it is guarding."""
+    assert correct_group_count("Báo cáo xác định ba chân dung chính.", 5).lower().startswith(
+        "báo cáo xác định năm chân dung")
+    assert correct_group_count("Ba nhóm khách hàng đã rời mạng được phân tích.", 5).startswith(
+        "Năm nhóm")
+
+
+def test_a_qualifier_far_away_does_not_protect_a_wrong_total():
+    """Only a qualifier attached to the phrase counts, not one elsewhere in the paragraph."""
+    text = "Báo cáo xác định ba chân dung chính. Một yếu tố khác nằm ngoài dữ liệu."
+    assert "năm chân dung" in correct_group_count(text, 5).lower()

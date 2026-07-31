@@ -494,6 +494,20 @@ _GROUP_COUNT_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: Words that make the count a SUBSET rather than the total. Anchored at the phrase and
+#: matched on WORD boundaries — "khác" must not fire on "khách hàng", which is how the first
+#: attempt at this guard disabled the correction entirely. A qualifier elsewhere in the
+#: paragraph does not shield a genuinely wrong total.
+_SUBSET_AFTER_RE = re.compile(
+    r"^\s*(?:còn lại|khác|đầu tiên|cuối cùng|nhỏ|lớn nhất|mang|thuộc|có tín hiệu"
+    r"|không có tín hiệu|trong số)\b",
+    re.IGNORECASE,
+)
+#: The same, for qualifiers that come BEFORE the number: "Trong đó ba nhóm ...".
+_SUBSET_BEFORE_RE = re.compile(r"(?:trong đó|trong số|còn)\s*$", re.IGNORECASE)
+#: How far either side of the phrase to look. One short clause, not the whole sentence.
+_QUALIFIER_WINDOW = 24
+
 
 def correct_group_count(text, actual_count):
     """Rewrite any stated number of personas to the number actually rendered.
@@ -505,6 +519,14 @@ def correct_group_count(text, actual_count):
 
     Tightening the prompt would not fix it — the prompt already forbids inventing figures.
     A count is arithmetic, so it is repaired here instead of requested there.
+
+    REGRESSION THIS CAUSED, and the reason for the qualifier check: the first version
+    matched every "<number> <noun>" without asking what was being counted, and the next real
+    report said "Một nhóm nhỏ tập trung vào sự cố kỹ thuật. Sáu nhóm còn lại chiếm tỷ trọng
+    lớn." above six personas — one plus six is seven. The model had written "Năm nhóm còn
+    lại", which was right, and this turned it wrong. A count followed by "còn lại", "khác",
+    "trong đó" or a restrictive clause is about a SUBSET; correcting it guarantees an error,
+    while leaving it alone merely declines to fix one.
 
     Args:
         text: Generated prose. Returned unchanged if empty.
@@ -520,6 +542,13 @@ def correct_group_count(text, actual_count):
 
     def fix(match):
         numeral, noun = match.group(1), match.group(2)
+        # A count qualified by "còn lại"/"khác"/"trong đó"/... is about a SUBSET, and the
+        # total is the wrong answer there. Correcting fewer sentences leaves the model's
+        # number, which may be right; correcting a qualified one makes it certainly wrong.
+        following = text[match.end():match.end() + _QUALIFIER_WINDOW]
+        preceding = text[max(0, match.start() - _QUALIFIER_WINDOW):match.start()]
+        if _SUBSET_AFTER_RE.match(following) or _SUBSET_BEFORE_RE.search(preceding):
+            return match.group(0)
         # Keep the form the model chose: a digit stays a digit, a word stays a word.
         # Rewriting "3 nhóm" as "năm nhóm" would read as an edit rather than a count.
         replacement = str(actual_count) if numeral.isdigit() else as_word
@@ -566,9 +595,15 @@ def should_offer_retention(persona: dict) -> bool:
             or persona.get('risk') in ("HIGH", "EXTREME"))
 
 
+#: Post-churn wording for the risk tiers. The tiers rank PRIORITY; they say nothing about
+#: whether a behavioural signal was found, and the previous labels claimed exactly that —
+#: "Nhóm có tín hiệu hành vi rõ ràng trước khi rời mạng" was printed over five personas on a
+#: report whose own executive summary counted three, because two of the five carried
+#: NO_STANDOUT_SIGNAL. Evidence and priority are different properties; only one of them is
+#: what a tier measures.
 _POST_CHURN_TIER_DISPLAY_LABELS = {
-    "Nhóm rủi ro cao – cần hành động ưu tiên": "Nhóm có tín hiệu hành vi rõ ràng trước khi rời mạng",
-    "Nhóm bị động – theo dõi & cảnh báo": "Nhóm không có dấu hiệu hành vi rõ ràng trước khi rời mạng",
+    "Nhóm rủi ro cao – cần hành động ưu tiên": "Nhóm ưu tiên rà soát cao",
+    "Nhóm bị động – theo dõi & cảnh báo": "Nhóm ưu tiên rà soát thấp hơn",
     "Nhóm cần giữ chân ngay – ưu tiên giữ chân": "Nhóm giá trị cao đã rời mạng – ưu tiên rà soát",
 }
 
@@ -1133,13 +1168,34 @@ class ReportGenerator:
         return {f: v for f, v in means.items() if str(f).lower() not in EXCLUDED_TECHNICAL_FEATURES}
 
     def _ranked_deviations(self, means: dict, global_means: dict) -> list:
+        """Rank features by how far the cluster sits from the population, keeping the SIGN.
+
+        The old arithmetic was ``abs(val - g_val) / abs(g_val)``, so a feature at -100%
+        produced the same 1.0 as one at +100%. Everything downstream then had to call it
+        something and called it a rise: the 22,358-customer persona named "Nhóm không có
+        khiếu nại nào trong suốt kỳ" reported "Lịch sử phàn nàn tăng rất mạnh" while its own
+        appendix printed -100.0% for the same family of columns. The appendix was right; it
+        uses ``relative_deviation``, which this now delegates to, so the report has one
+        arithmetic instead of two that disagree.
+
+        The old zero-baseline branch returned ``abs(val) * 100``, which is not a ratio and
+        was rendered with a percent sign. A ratio needs a positive magnitude to be a ratio
+        OF something, so those features now carry None and sort last rather than first.
+
+        Returns:
+            [(feature, value, baseline, signed deviation or None)], largest movement first.
+        """
         deviations = []
         for f, val in means.items():
             g_val = global_means.get(f, 0)
-            dev = abs(val - g_val) / abs(g_val) if g_val != 0 else abs(val) * 100
-            deviations.append((f, val, g_val, dev))
-        deviations.sort(key=lambda x: x[3], reverse=True)
+            deviations.append((f, val, g_val, relative_deviation(val, g_val)))
+        deviations.sort(key=lambda x: abs(x[3]) if x[3] is not None else -1.0, reverse=True)
         return deviations
+
+    @staticmethod
+    def _magnitude(deviation) -> float:
+        """Size of a deviation for comparison, treating an unusable ratio as the smallest."""
+        return abs(deviation) if deviation is not None else -1.0
 
     def _resolve_conflicts(self, deviations: list) -> list:
         """Drop the weaker signal of any known-opposite pair (e.g. spending_growth vs
@@ -1149,7 +1205,8 @@ class ReportGenerator:
         for a, b in CONFLICTING_FEATURE_PAIRS:
             if a in feature_names and b in feature_names:
                 idx_a, idx_b = feature_names.index(a), feature_names.index(b)
-                dropped.add(a if deviations[idx_a][3] < deviations[idx_b][3] else b)
+                weaker = a if self._magnitude(deviations[idx_a][3]) < self._magnitude(deviations[idx_b][3]) else b
+                dropped.add(weaker)
         return [d for d in deviations if d[0] not in dropped]
 
     def _top_signals(self, means: dict, global_means: dict, top_n: int = 3) -> list:
@@ -1306,9 +1363,23 @@ class ReportGenerator:
         # Trình tự tín hiệu — CHỈ dùng dữ liệu THẬT có (old vs recent), không suy diễn timeline
         # theo tháng chính xác (dữ liệu chỉ có 2 giai đoạn, không có lưới thời gian chi tiết hơn).
         onset = p.get('onset_sequence') or []
-        signaled = [t for t in onset if isinstance(t, dict) and (t.get('old', 0) > 0 or t.get('recent', 0) > 0)]
-        if len(signaled) >= 2 and signaled[0].get('metric') != signaled[-1].get('metric'):
-            bullets.append(f"Trình tự tín hiệu: {signaled[0].get('metric', 'N/A')} xuất hiện sớm nhất, {signaled[-1].get('metric', 'N/A')} chỉ mới xuất hiện gần đây trước khi rời mạng")
+        # Each half of the sentence has to be true of the metric it names. onset_sequence is
+        # sorted by the EARLY value descending, which orders onset correctly but says nothing
+        # about whether either metric is still present at the end. The 6,222-customer persona
+        # printed "Sự cố kỹ thuật chỉ mới xuất hiện gần đây" beside its own table showing that
+        # metric going 0.068 -> 0.0, labelled "giảm mạnh". So: the earliest metric must have
+        # actually been there early, and the recent one must have actually grown.
+        entries = [t for t in onset if isinstance(t, dict)]
+        earliest = entries[0] if entries and float(entries[0].get('old') or 0) > 0 else None
+        latest = next(
+            (t for t in reversed(entries)
+             if float(t.get('recent') or 0) > float(t.get('old') or 0)),
+            None,
+        )
+        if earliest and latest and earliest.get('metric') != latest.get('metric'):
+            bullets.append(
+                f"Trình tự tín hiệu: {earliest.get('metric', 'N/A')} xuất hiện sớm nhất, "
+                f"{latest.get('metric', 'N/A')} chỉ mới xuất hiện gần đây trước khi rời mạng")
 
         svc_comp = profile.get('service_composition')
         svc_desc = self._describe_composition(svc_comp) if svc_comp else ""
@@ -1644,7 +1715,10 @@ class ReportGenerator:
                 'dac_trung_noi_bat': [
                     self._get_business_signal(f, val, g_val) for f, val, g_val, _ in deviations
                 ],
-                'confidence': "High" if (deviations and deviations[0][3] > 1.0) else "Medium",
+                # Magnitude, not signed value: a cluster sitting 100% BELOW the population
+                # is as strong a claim as one sitting 100% above, and an unusable ratio is
+                # no evidence at all rather than a large negative one.
+                'confidence': "High" if (deviations and self._magnitude(deviations[0][3]) > 1.0) else "Medium",
             })
         data_str = json.dumps(clean_data, ensure_ascii=False, indent=2)
         return f"""
@@ -1722,7 +1796,9 @@ Dữ liệu duy nhất bạn được thấy:
                 means = self._get_means(p)
                 deviations = self._top_signals(means, global_means, top_n=3) if means else []
                 c['business_signals'] = [self._get_business_signal(f, val, g_val) for f, val, g_val, dev in deviations]
-                confidence_dev = deviations[0][3] if deviations else 0
+                # Magnitude: a cluster 100% BELOW the population is as strong a claim as one
+                # 100% above, and an unusable ratio is no evidence rather than a big negative.
+                confidence_dev = self._magnitude(deviations[0][3]) if deviations else 0
 
             profile_context = self._build_profile_context(p)
             if profile_context:
