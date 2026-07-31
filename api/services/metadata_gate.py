@@ -162,3 +162,49 @@ def labels_for_columns(search_dir: str, active_columns: Sequence[str] | None) ->
             if isinstance(column, str) and isinstance(label, str) and label.strip():
                 labels.setdefault(column, label.strip())
     return labels
+
+
+def absent_zero_columns(search_dir: str, active_columns: Sequence[str] | None) -> set[str]:
+    """Columns the data owner has declared record events, where a blank really is a zero.
+
+    Blank-versus-zero cannot be settled from the data. On the Churn_VT export the evidence
+    points both ways at once: ``total_negative_202601`` writes an explicit 0 among its 7,751
+    present values, which suggests a blank means something else — but that is an inference,
+    and acting on inferences about what was measured is the failure this pipeline keeps
+    finding. So only an explicit declaration counts.
+
+    Gated exactly like :func:`labels_for_columns`: a declaration made about another export
+    is worse than none, because it fills a column here on a different file's authority.
+    Only ``"zero"`` is served. ``"unmeasured"`` and an absent declaration are the same
+    instruction to the caller — leave the cautious default alone — so they are not
+    distinguished here.
+
+    Args:
+        search_dir: Directory to scan for ``*metadata*.json`` (non-recursive).
+        active_columns: Columns of the active dataset, or None if unknown.
+
+    Returns:
+        Column names whose blanks may be filled with 0. Never raises.
+    """
+    if not active_columns:
+        return set()
+
+    declared: set[str] = set()
+    for path in sorted(glob.glob(os.path.join(search_dir, "*metadata*.json"))):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not describes_active_dataset(parsed, active_columns):
+            continue
+        entries = parsed.get("columns") if isinstance(parsed, dict) else parsed
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            column = entry.get("column") or entry.get("name")
+            if isinstance(column, str) and entry.get("absent_means") == "zero":
+                declared.add(column)
+    return declared

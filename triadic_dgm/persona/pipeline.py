@@ -276,20 +276,28 @@ def is_near_constant(series: pd.Series, max_modal: float = _MAX_MODAL_FRACTION) 
     return bool(float(values.value_counts(normalize=True).iloc[0]) > max_modal)
 
 
-def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | None = None) -> list[str]:
+def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | None = None,
+                   absent_means_zero: set[str] | None = None) -> list[str]:
     """Every numeric column that actually varies — the pipeline's own deterministic choice.
 
     ``exclude`` holds columns that describe the OUTCOME rather than the behaviour. Cluster
     on those and the segmentation is partly a restatement of the answer, which the report
     then presents as a finding about the customers.
+
+    ``absent_means_zero`` names the columns the data owner has declared record events, and
+    it is needed HERE, not only later: a sparse event flag stores 1 where the event happened
+    and nothing where it did not, so its present values are all identical and the
+    near-constant guard drops it before the declaration is ever consulted — which would make
+    declaring it pointless. Those columns are judged on the values as they will be used.
     """
     numeric = data.select_dtypes(include="number")
     excluded = set(exclude or ())
+    declared = set(absent_means_zero or ())
     feats, identifiers, flat = [], [], []
     for c in numeric.columns:
         if c == cluster_col or c in excluded:
             continue
-        if is_near_constant(numeric[c]):
+        if is_near_constant(numeric[c].fillna(0.0) if c in declared else numeric[c]):
             flat.append(str(c))
         elif _is_row_identifier(numeric[c]):
             identifiers.append(str(c))
@@ -661,8 +669,23 @@ def run_persona_pipeline(
                 f"kiểu số, không dùng để phân cụm được",
             )
 
+    # Which blanks are real zeros — a business fact, so only an explicit declaration counts.
+    # Loaded first: it decides both which columns survive feature selection and which
+    # survive the matrix.
+    absent_zero: set[str] = set()
+    try:
+        from api.services.metadata_gate import absent_zero_columns
+
+        absent_zero = absent_zero_columns(label_dir or os.getcwd(), list(data.columns))
+        if absent_zero:
+            print(f"[PIPELINE] {len(absent_zero)} cột được nghiệp vụ khai báo 'ô trống = "
+                  f"không phát sinh', điền 0: " + ", ".join(sorted(absent_zero)))
+    except Exception as e:  # a dictionary problem must not take the run down
+        print(f"[PIPELINE] không nạp được khai báo ô trống (bỏ qua): {e}")
+
     mode = dataset_mode or detect_dataset_mode(data.columns)
-    auto_feats = _auto_features(data, cluster_col, exclude={status_col} if status_col else None)
+    auto_feats = _auto_features(data, cluster_col, exclude={status_col} if status_col else None,
+                                absent_means_zero=absent_zero)
     caller_feats = [f for f in (behavioral_features or []) if f != status_col]
 
     # On GENERIC data the pipeline picks the features, not the caller.
@@ -695,7 +718,8 @@ def run_persona_pipeline(
 
     if len(feats) < 2:
         return _failed_persona(data, "insufficient_numeric_features")
-    prepared = _prepare_matrix(data, feats)
+
+    prepared = _prepare_matrix(data, feats, absent_means_zero=absent_zero)
     if prepared is None:
         zero_fraction = float(
             (data[feats].apply(pd.to_numeric, errors="coerce").fillna(0.0) == 0).to_numpy().mean()

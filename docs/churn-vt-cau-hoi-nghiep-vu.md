@@ -9,7 +9,7 @@ Trả lời được câu nào thì điền câu đó, không cần đủ hết.
 
 ## A. 14 cột chưa có mô tả
 
-Đây là các cột còn để trống trong file review (`Churn_VT_metadata_review.csv`, cột
+Đây là các cột còn để trống trong file review (`final_churn_VT_metadata_review.csv`, cột
 `mo_ta_nghiep_vu_xac_nhan`). Tất cả đều gần như đủ dữ liệu, nên chỉ thiếu ý nghĩa.
 
 | Cột | Đã đo được | Cần biết |
@@ -67,16 +67,26 @@ Hiện tại chúng tôi đang **loại** các cột này, vì có một bằng 
 có 7.751 dòng có giá trị, trong đó min = 0 — tức khi thật sự không phát sinh thì hệ thống
 *có* ghi số 0. Vậy ô trống nhiều khả năng mang nghĩa khác.
 
-Nhờ anh/chị xác nhận cho từng họ cột:
+**File review giờ đã có sẵn cột để anh/chị trả lời**: cột `o_trong_nghia_la`. Những cột
+cần khai báo được đánh dấu `CÓ` ở cột `can_khai_bao_o_trong`. Chỉ cần điền một trong hai
+chữ:
 
-| Họ cột | Tỉ lệ trống | Ô trống nghĩa là gì? |
+| Điền | Nghĩa | Hệ thống sẽ làm gì |
 |---|---|---|
-| `total_negative_202601…202606` | 67,7% – 90,5% | ☐ không phát sinh điểm chạm ☐ tháng đó không đo ☐ khác: |
-| `LLSD_202603…202606` | 13,1% – 61,4% | ☐ không phát sinh lưu lượng ☐ không đo ☐ khác: |
-| `total_call_*`, `total_missed_*`, `ratio_missed_*` | 98,2% | ☐ không có cuộc gọi ☐ không đo ☐ khác: |
+| `không phát sinh` | tháng/kỳ đó thật sự không có gì xảy ra | điền 0 và **đưa cột vào phân tích** |
+| `không đo` | không thu thập, hoặc thuê bao không thuộc phạm vi | **loại cột ra**, không bịa số |
 
-Nếu là "không phát sinh", chúng tôi lấy lại được 6 cột điểm chạm tiêu cực vào phân tích —
-đây là tín hiệu có giá trị, hiện đang phải bỏ.
+Để trống = chưa khai báo, hệ thống giữ mặc định thận trọng (loại ra).
+
+Các họ cột đang chờ:
+
+| Họ cột | Tỉ lệ trống | Ghi chú của chúng tôi |
+|---|---|---|
+| `total_negative_202601…202606` | 67,7% – 90,5% | Đây là 6 cột **có giá trị nhất** đang phải bỏ |
+| `LLSD_202603…202606` | 13,1% – 61,4% | |
+| `total_call_*`, `total_missed_*`, `ratio_missed_*` | 98,2% | xem thêm C2 |
+
+Trả lời câu này là hệ thống tự đổi hành vi, không cần sửa code lần nào nữa.
 
 ### C2. Nhóm cột cuộc gọi chỉ có 1.133/62.467 dòng (1,8%) — và không dòng nào có giá trị 1
 
@@ -132,6 +142,7 @@ nhận thêm hai điểm:
 
 ## Cách gửi lại
 
-Điền trực tiếp vào file `Churn_VT_metadata_review.csv` (cột `mo_ta_nghiep_vu_xac_nhan`),
-hoặc trả lời thẳng trong file này cũng được — chúng tôi đọc được cả hai định dạng, kể cả
+Điền trực tiếp vào file `final_churn_VT_metadata_review.csv` — cột
+`mo_ta_nghiep_vu_xac_nhan` cho phần A/B, cột `o_trong_nghia_la` cho phần C1 — hoặc trả
+lời thẳng trong file này cũng được — chúng tôi đọc được cả hai định dạng, kể cả
 khi anh/chị sửa đè lên cột mô tả hoặc đổi tên tiêu đề cột.

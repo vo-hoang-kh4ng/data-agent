@@ -28,6 +28,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 import pandas as pd
@@ -95,6 +96,53 @@ NAMING_RULES: list[tuple[str, str, str, str]] = [
 
 NEEDS_REVIEW = {"thấp", "không"}
 REVIEW_COLUMN = "mo_ta_nghiep_vu_xac_nhan"
+
+#: Ô cho người soát khai báo Ô TRỐNG trong cột đó nghĩa là gì. Xem normalize_absent_means().
+ABSENT_COLUMN = "o_trong_nghia_la"
+#: Cột đánh dấu cột nào CẦN khai báo — chỉ những cột thực sự có ô trống.
+ABSENT_FLAG_COLUMN = "can_khai_bao_o_trong"
+
+_ABSENT_ZERO_WORDS = ("khong_phat_sinh", "khong phat sinh", "zero", "0")
+_ABSENT_UNMEASURED_WORDS = ("khong_do", "khong do", "khong thuoc pham vi", "unmeasured")
+
+
+def _no_accents(text: str) -> str:
+    """Bỏ dấu tiếng Việt để so khớp khai báo người soát gõ tay.
+
+    `đ`/`Đ` phải xử lý riêng: chúng là KÝ TỰ độc lập (U+0111/U+0110), không phải `d` cộng
+    dấu, nên NFD không tách được — "không đo" giữ nguyên chữ đ và trượt khỏi mọi phép so
+    khớp. Đúng chỗ này đã làm hỏng nhánh "không đo" ở lần chạy test đầu tiên.
+    """
+    stripped = text.replace("đ", "d").replace("Đ", "D")
+    return "".join(
+        c for c in unicodedata.normalize("NFD", stripped) if unicodedata.category(c) != "Mn"
+    )
+
+
+def normalize_absent_means(written: str | None) -> str:
+    """Đọc khai báo của người soát về Ý NGHĨA của ô trống trong một cột.
+
+    Câu hỏi này KHÔNG trả lời được từ dữ liệu. Trên bản Churn_VT, bằng chứng còn chỉ về cả
+    hai phía: `total_negative_202601` có ghi số 0 tường minh ở 7.751 dòng có dữ liệu, nghĩa
+    là ô trống nhiều khả năng mang nghĩa khác — nhưng đó là SUY LUẬN, và suy luận đúng kiểu
+    đó là cách báo cáo khẳng định thứ không ai đo. Nên để nghiệp vụ khai báo.
+
+    Chấp nhận cả có dấu lẫn không dấu, hoa lẫn thường: người soát dùng Excel, không dùng
+    một danh mục enum.
+
+    Returns:
+        "zero" (ô trống = không phát sinh, điền 0), "unmeasured" (= không đo, phải loại),
+        hoặc "" khi chưa ai khai báo — cái nhún vai của người soát KHÔNG được đọc thành
+        câu trả lời theo bất kỳ hướng nào.
+    """
+    if not written:
+        return ""
+    text = _no_accents(str(written).strip().lower()).replace("-", "_")
+    if any(w in text for w in _ABSENT_ZERO_WORDS):
+        return "zero"
+    if any(w in text for w in _ABSENT_UNMEASURED_WORDS):
+        return "unmeasured"
+    return ""
 
 #: Tên cột "tên cột" và "mô tả" mà file review có thể quay về dưới nhiều dạng — xem
 #: load_confirmations().
@@ -200,6 +248,27 @@ def load_confirmations(review_path: Path) -> dict[str, str]:
     return confirmed
 
 
+def load_absent_declarations(review_path: Path) -> dict[str, str]:
+    """Khai báo ý nghĩa ô trống mà người soát đã điền, đã chuẩn hoá.
+
+    Chỉ trả về những cột thực sự có khai báo — cột chưa ai đụng tới không xuất hiện, để
+    phía dùng giữ nguyên mặc định thận trọng (loại cột) thay vì điền 0.
+    """
+    if not review_path.exists():
+        return {}
+    previous = pd.read_csv(review_path)
+    name_header = _first_header(previous, _NAME_HEADERS)
+    absent_header = _first_header(previous, (ABSENT_COLUMN, "Ô trống nghĩa là", "absent_means"))
+    if name_header is None or absent_header is None:
+        return {}
+    declared = {}
+    for name, written in zip(previous[name_header], previous[absent_header]):
+        value = normalize_absent_means(None if pd.isna(written) else written)
+        if value:
+            declared[str(name)] = value
+    return declared
+
+
 def load_group_overrides(review_path: Path) -> dict[str, str]:
     """Nhóm nghiệp vụ đã sửa lại trong file review.
 
@@ -235,6 +304,7 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
     source_of_truth = returned_review or review_path
     confirmed = load_confirmations(source_of_truth)
     regrouped = load_group_overrides(source_of_truth)
+    absent_declared = load_absent_declarations(source_of_truth)
     df = pd.read_csv(csv_path, low_memory=False)
     total_rows = len(df)
 
@@ -254,6 +324,10 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
         else:
             sample = ""
 
+        # Chỉ hỏi về ô trống ở cột THỰC SỰ có ô trống — hỏi cả 97 cột là nhiễu.
+        absent_pct = round((total_rows - non_null) / total_rows * 100, 2)
+        absent_means = absent_declared.get(str(name), "")
+
         columns.append({
             "column": str(name),
             "type": str(series.dtype),
@@ -262,6 +336,9 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
             "label": short_label(description),
             "group": group,
             "confirmed": is_confirmed,
+            # "zero" = ô trống nghĩa là không phát sinh (điền 0); "unmeasured" = không đo
+            # (phải loại); "" = chưa ai khai báo, phía dùng giữ mặc định thận trọng.
+            "absent_means": absent_means,
         })
         review_rows.append({
             "cot": str(name),
@@ -270,10 +347,12 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
             "do_tin_cay": confidence,
             "can_xac_nhan": "" if is_confirmed else ("CÓ" if confidence in NEEDS_REVIEW else ""),
             "kieu_du_lieu": str(series.dtype),
-            "ti_le_thieu_pct": round((total_rows - non_null) / total_rows * 100, 2),
+            "ti_le_thieu_pct": absent_pct,
             "so_gia_tri_khac_nhau": int(series.nunique(dropna=True)),
             "trung_vi": sample,
             REVIEW_COLUMN: confirmed.get(name, ""),
+            ABSENT_FLAG_COLUMN: "CÓ" if (absent_pct > 0 and not absent_means) else "",
+            ABSENT_COLUMN: {"zero": "không phát sinh", "unmeasured": "không đo"}.get(absent_means, ""),
         })
 
     json_path.write_text(json.dumps({
