@@ -429,6 +429,67 @@ def binary_features(data: pd.DataFrame, feats: list[str]) -> set[str]:
     return flags
 
 
+def modal_values(data: pd.DataFrame, feats) -> dict[str, Any]:
+    """The commonest value of each feature across the WHOLE dataset.
+
+    The baseline :func:`feature_coverage` measures departure from. It has to come from the
+    dataset rather than from the cluster being measured: a flag that is true for every
+    member of a group is that group's strongest characteristic, and comparing it against the
+    group's own modal value would score it zero — exactly backwards. Caught by running the
+    real file, where `no_complaint_all_period` sat at 1.00 across an entire 22,358-customer
+    cluster and the first version of this measure suppressed it.
+    """
+    modes: dict[str, Any] = {}
+    for column in feats:
+        if column not in data.columns:
+            continue
+        counts = pd.to_numeric(data[column], errors="coerce").value_counts(dropna=False)
+        if not counts.empty:
+            modes[str(column)] = counts.index[0]
+    return modes
+
+
+def feature_coverage(data: pd.DataFrame, feats, modes: dict | None = None) -> dict[str, float]:
+    """Share of rows each feature actually applies to, i.e. sits away from its usual value.
+
+    A cluster mean says how much; this says how many. The distinction is what separates a
+    description from an artefact: the real report characterised a 3,816-customer persona by
+    ``ratio_missed_30d`` at +1522%, a column carrying anything at all on 1.81% of rows.
+    Whether those zeros were recorded or filled in upstream by an improvised preprocessing
+    script, "this group is characterised by X" is false when X is absent from nearly all of
+    it — and coverage detects that without having to know which of the two happened.
+
+    Args:
+        data: The rows to measure over — one cluster's slice, normally.
+        feats: Feature names.
+        modes: Dataset-wide modal value per feature, from :func:`modal_values`. Omit it and
+            each column is compared against its own modal value within ``data``, which is
+            only the right question when ``data`` IS the whole dataset.
+
+    Returns:
+        {feature: share in [0, 1]}. Columns not present are omitted.
+    """
+    coverage: dict[str, float] = {}
+    total = len(data)
+    if not total:
+        return coverage
+    baseline = modes if modes is not None else modal_values(data, feats)
+    for column in feats:
+        if column not in data.columns:
+            continue
+        key = str(column)
+        if key not in baseline:
+            continue
+        values = pd.to_numeric(data[column], errors="coerce")
+        modal = baseline[key]
+        # Absent counts as its own value, and usually as the modal one. A column present on
+        # a tenth of the rows applies to a tenth of them; dropping the gaps first would make
+        # it look universal, which is the reverse of what this measures.
+        same = values.isna().sum() if pd.isna(modal) else (values == modal).sum()
+        coverage[key] = float(total - int(same)) / total
+    return coverage
+
+
 def cohort_mix(statuses: pd.Series) -> dict[str, float]:
     """Measure the share of each outcome present in ``statuses``.
 
@@ -858,6 +919,10 @@ def run_persona_pipeline(
                 if active_status_values else None
             )
 
+    # Computed once over the whole dataset — each cluster's coverage is measured against
+    # what is usual across the file, not against what is usual inside that cluster.
+    dataset_modes = modal_values(data, feats)
+
     personas: list[dict[str, Any]] = []
     for cid in sorted(cluster_sizes):
         meta = metadata[cid]
@@ -893,6 +958,11 @@ def run_persona_pipeline(
             "cohort_mix": mix_by_cluster.get(cid, {}),
             "active_pct": active_by_cluster.get(cid),
             "time_window_caveat": window_caveat,
+            # How many of THIS cluster's members each feature applies to. The report refuses
+            # to describe a group by a feature almost none of it carries — see
+            # feature_coverage() for the artefact that made this necessary.
+            "feature_coverage": feature_coverage(
+                data[data[cluster_col] == cid], feats, modes=dataset_modes),
             "is_anomaly": is_anomaly,
             "segmentation_quality": quality,
             # "caller" = the feature list supplied to this call was used; "auto" = the

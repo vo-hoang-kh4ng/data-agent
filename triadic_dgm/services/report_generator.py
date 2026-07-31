@@ -508,6 +508,12 @@ _SUBSET_BEFORE_RE = re.compile(r"(?:trong đó|trong số|còn)\s*$", re.IGNOREC
 #: How far either side of the phrase to look. One short clause, not the whole sentence.
 _QUALIFIER_WINDOW = 24
 
+#: Smallest share of a cluster a feature may apply to and still be offered as a DESCRIPTION
+#: of that cluster. One in five is the line: below it, "this group is characterised by X" is
+#: a statement about a minority dressed as a statement about the group. See
+#: ReportGenerator._top_signals_covered().
+_MIN_SIGNAL_COVERAGE = 0.20
+
 
 def correct_group_count(text, actual_count):
     """Rewrite any stated number of personas to the number actually rendered.
@@ -907,7 +913,7 @@ class ReportGenerator:
             self._build_profile_context(p), (p.get('profile_attributes') or {}).get('service_composition'))
 
         means = self._get_means(p)
-        top = self._top_signals(means, global_means, top_n=1) if means else []
+        top = self._top_signals_covered(p, global_means, top_n=1) if means else []
         magnitude, noun = None, None
         if top:
             f, val, g_val, _ = top[0]
@@ -985,7 +991,7 @@ class ReportGenerator:
             bullets.append(p['churn_driver_evidence'])
         means = self._get_means(p)
         if means:
-            for f, val, g_val, _ in self._top_signals(means, global_means, top_n=top_n):
+            for f, val, g_val, _ in self._top_signals_covered(p, global_means, top_n=top_n):
                 bullets.append(self._get_business_signal(f, val, g_val))
         profile = p.get('profile_attributes') or {}
         svc_comp = profile.get('service_composition')
@@ -1211,6 +1217,27 @@ class ReportGenerator:
 
     def _top_signals(self, means: dict, global_means: dict, top_n: int = 3) -> list:
         return self._resolve_conflicts(self._ranked_deviations(means, global_means))[:top_n]
+
+    def _top_signals_covered(self, persona: dict, global_means: dict, top_n: int = 3) -> list:
+        """:meth:`_top_signals`, minus the features that describe almost none of the group.
+
+        A deviation says how far the cluster mean sits from the population. It does not say
+        how many members that applies to, and the two come apart badly: the real report
+        headlined a 3,816-customer persona with ``ratio_missed_30d`` +1522%, a column
+        carrying anything at all on 1.81% of rows. The arithmetic was right; the sentence it
+        produced — "this group is characterised by X" — was not.
+
+        Coverage is only suppressed from the DESCRIPTION. Every number stays in the appendix,
+        so a reader can see what was left out; hiding it there would be the opposite error.
+
+        Personas written before ``feature_coverage`` existed have none, and are left alone
+        rather than silently stripped of every signal.
+        """
+        signals = self._top_signals(self._get_means(persona), global_means, top_n=top_n)
+        coverage = persona.get('feature_coverage')
+        if not isinstance(coverage, dict) or not coverage:
+            return signals
+        return [s for s in signals if coverage.get(s[0], 1.0) >= _MIN_SIGNAL_COVERAGE]
 
     def _get_feature_val(self, p: dict, keywords: list) -> float:
         """Đọc trực tiếp 1 giá trị feature_means/evidence theo substring keyword — dùng cho các
@@ -1707,7 +1734,7 @@ class ReportGenerator:
         clean_data = []
         for p in personas_data:
             means = self._get_means(p)
-            deviations = self._top_signals(means, global_means, top_n=3) if means else []
+            deviations = self._top_signals_covered(p, global_means, top_n=3) if means else []
             clean_data.append({
                 'persona': self.clean_persona_name(p.get('persona_name', '')),
                 'cluster_id': p.get('cluster_id'),
@@ -1794,7 +1821,7 @@ Dữ liệu duy nhất bạn được thấy:
             else:
                 # Fallback (no domain_signature in JSON — older run) — flat top-3 as before.
                 means = self._get_means(p)
-                deviations = self._top_signals(means, global_means, top_n=3) if means else []
+                deviations = self._top_signals_covered(p, global_means, top_n=3) if means else []
                 c['business_signals'] = [self._get_business_signal(f, val, g_val) for f, val, g_val, dev in deviations]
                 # Magnitude: a cluster 100% BELOW the population is as strong a claim as one
                 # 100% above, and an unusable ratio is no evidence rather than a big negative.
@@ -2217,7 +2244,7 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
                     continue
                 p_name = display_name_map.get(p.get('cluster_id'), self.clean_persona_name(p.get('persona_name', '')))
                 means = self._get_means(p)
-                top = self._top_signals(means, global_means, top_n=1) if means else []
+                top = self._top_signals_covered(p, global_means, top_n=1) if means else []
                 why = None
                 if top:
                     f, val, g_val, _ = top[0]
@@ -2256,9 +2283,9 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
             means = self._get_means(p)
             signals = []
             confidence = "MEDIUM"
-            deviations = self._top_signals(means, global_means, top_n=3) if means else []
+            deviations = self._top_signals_covered(p, global_means, top_n=3) if means else []
             if deviations:
-                if deviations[0][3] > 1.0: confidence = "HIGH"
+                if self._magnitude(deviations[0][3]) > 1.0: confidence = "HIGH"
                 for f, val, g_val, dev in deviations:
                     signals.append(f"- {self._get_business_signal(f, val, g_val)}")
                     
