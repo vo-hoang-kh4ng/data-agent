@@ -208,3 +208,46 @@ def absent_zero_columns(search_dir: str, active_columns: Sequence[str] | None) -
             if isinstance(column, str) and entry.get("absent_means") == "zero":
                 declared.add(column)
     return declared
+
+
+def nominal_columns(search_dir: str, active_columns: Sequence[str] | None) -> set[str]:
+    """Columns that were TEXT in the source file — names, not quantities.
+
+    Recorded off the raw export before any preprocessing runs, which is the whole point:
+    the frame the pipeline receives is built by a script an LLM writes on each run, and
+    encoding a categorical column is the most ordinary step in preparing data for KMeans.
+    Once ``LOCATIONNAME`` has become 61 dense integer codes nothing in its values says it
+    used to be "Ha Noi" — but the metadata still does.
+
+    Gated exactly like :func:`labels_for_columns` and :func:`absent_zero_columns`: a
+    declaration made about another export must not decide what is a category here.
+
+    Args:
+        search_dir: Directory to scan for ``*metadata*.json`` (non-recursive).
+        active_columns: Columns of the active dataset, or None if unknown.
+
+    Returns:
+        Column names that hold categories. Never raises.
+    """
+    if not active_columns:
+        return set()
+
+    nominal: set[str] = set()
+    for path in sorted(glob.glob(os.path.join(search_dir, "*metadata*.json"))):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not describes_active_dataset(parsed, active_columns):
+            continue
+        entries = parsed.get("columns") if isinstance(parsed, dict) else parsed
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            column = entry.get("column") or entry.get("name")
+            if isinstance(column, str) and entry.get("nominal") is True:
+                nominal.add(column)
+    return nominal

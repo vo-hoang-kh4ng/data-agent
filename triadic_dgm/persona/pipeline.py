@@ -73,6 +73,12 @@ _MAX_MODAL_FRACTION = 0.995
 #: group is down-weighted so it votes once. See redundancy_weights().
 _REDUNDANCY_THRESHOLD = 0.95
 
+#: Số mã tối thiểu để một cột nguyên liền mạch 0..n-1 bị coi là danh mục đã mã hoá.
+#: Trên bản trích xuất 62.467 dòng, cột đếm thật rộng nhất (`recent_complaint`) có 11 mã,
+#: còn `LOCATIONNAME` mã hoá có 61 — ngưỡng nằm giữa khoảng trống đó. Xem
+#: looks_like_encoded_category().
+_MIN_CATEGORY_CODES = 20
+
 #: Name for a GENERIC cluster that deviates on nothing. States what was measured and
 #: assumes nothing about what the dataset describes.
 _NEAR_MEAN_NAME = "Nhóm gần trung bình toàn tập"
@@ -250,6 +256,38 @@ def _is_row_identifier(series: pd.Series) -> bool:
     return bool((values % 1 == 0).all())
 
 
+def looks_like_encoded_category(series: pd.Series,
+                                min_codes: int = _MIN_CATEGORY_CODES) -> bool:
+    """True for a numeric column that is really a list of names.
+
+    `LOCATIONNAME` (61 khu vực) đi qua sạch mọi rào của nhánh này sau khi được mã hoá: nó
+    biến thiên, không gần hằng số, không phải định danh dòng. Thứ tới được StandardScaler
+    là một trục mà "Ha Noi"(17) cách "Ho Chi Minh"(22) 5 đơn vị và cách "Cao Bang"(56) 39
+    đơn vị — những khoảng cách không có nghĩa gì, lại được cân ngang với cước và số khiếu nại.
+
+    Dấu vết nhận ra: label encoding sinh ra đúng 0..n-1 liền mạch. Cột đếm thật thì thưa
+    (`[0, 5, 40, 900]`), có sàn khác 0 (năm sinh), hoặc ít mã (`positive_months` có 7).
+
+    Đây là LƯỚI, không phải bằng chứng — khai báo từ metadata mới là thứ có thẩm quyền, và
+    nó bắt được cả những mã hoá quá ít mã để nhìn thấy từ hình dạng. Ngưỡng nằm giữa 11 mã
+    (cột đếm thật rộng nhất) và 61 mã (khu vực đã mã hoá), nên biên an toàn ở cả hai phía.
+
+    Args:
+        series: Một cột số ứng viên.
+        min_codes: Số mã tối thiểu trước khi cột bị coi là danh mục.
+
+    Returns:
+        Cột có mang dấu vết của một danh mục đã mã hoá hay không.
+    """
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if len(values) == 0 or not bool((values % 1 == 0).all()):
+        return False
+    codes = np.sort(values.unique())
+    if len(codes) < min_codes:
+        return False
+    return bool(codes[0] == 0 and len(codes) == codes[-1] + 1)
+
+
 def is_near_constant(series: pd.Series, max_modal: float = _MAX_MODAL_FRACTION) -> bool:
     """True when too few rows differ from the commonest value to describe a group.
 
@@ -276,8 +314,8 @@ def is_near_constant(series: pd.Series, max_modal: float = _MAX_MODAL_FRACTION) 
     return bool(float(values.value_counts(normalize=True).iloc[0]) > max_modal)
 
 
-def usable_features(data: pd.DataFrame, feats, absent_means_zero: set[str] | None = None
-                    ) -> tuple[list[str], dict[str, str]]:
+def usable_features(data: pd.DataFrame, feats, absent_means_zero: set[str] | None = None,
+                    nominal: set[str] | None = None) -> tuple[list[str], dict[str, str]]:
     """Filter ``feats`` down to the columns that can carry a segmentation, and say what went.
 
     The same three refusals :func:`_auto_features` makes, applied to ANY feature list. That
@@ -292,11 +330,14 @@ def usable_features(data: pd.DataFrame, feats, absent_means_zero: set[str] | Non
         feats: Candidate feature names, in the caller's order.
         absent_means_zero: Columns whose blanks are declared zeros; judged on the values as
             they will be used, so a sparse event flag is not mistaken for a constant.
+        nominal: Columns the source metadata records as text. Refused however numeric they
+            have since become — the declaration outranks the shape of the values.
 
     Returns:
         (kept in the given order, {dropped column: reason}).
     """
     declared = set(absent_means_zero or ())
+    categories = set(nominal or ())
     kept: list[str] = []
     dropped: dict[str, str] = {}
     for column in feats:
@@ -307,18 +348,24 @@ def usable_features(data: pd.DataFrame, feats, absent_means_zero: set[str] | Non
         if not pd.api.types.is_numeric_dtype(series):
             dropped[str(column)] = "không phải kiểu số"
             continue
-        if is_near_constant(series.fillna(0.0) if column in declared else series):
-            dropped[str(column)] = "gần như hằng số"
-            continue
+        # Định danh xét TRƯỚC danh mục: `range(n)` mang cả hai dấu vết, và "định danh" là
+        # phát biểu chính xác hơn (mọi giá trị đều khác nhau — một mã hoá thì có lặp).
         if _is_row_identifier(series):
             dropped[str(column)] = "định danh"
+            continue
+        if column in categories or looks_like_encoded_category(series):
+            dropped[str(column)] = "danh mục đã mã hoá"
+            continue
+        if is_near_constant(series.fillna(0.0) if column in declared else series):
+            dropped[str(column)] = "gần như hằng số"
             continue
         kept.append(column)
     return kept, dropped
 
 
 def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | None = None,
-                   absent_means_zero: set[str] | None = None) -> list[str]:
+                   absent_means_zero: set[str] | None = None,
+                   nominal: set[str] | None = None) -> list[str]:
     """Every numeric column that actually varies — the pipeline's own deterministic choice.
 
     ``exclude`` holds columns that describe the OUTCOME rather than the behaviour. Cluster
@@ -334,16 +381,23 @@ def _auto_features(data: pd.DataFrame, cluster_col: str, exclude: set[str] | Non
     numeric = data.select_dtypes(include="number")
     excluded = set(exclude or ())
     declared = set(absent_means_zero or ())
-    feats, identifiers, flat = [], [], []
+    categories = set(nominal or ())
+    feats, identifiers, flat, encoded = [], [], [], []
     for c in numeric.columns:
         if c == cluster_col or c in excluded:
             continue
-        if is_near_constant(numeric[c].fillna(0.0) if c in declared else numeric[c]):
-            flat.append(str(c))
-        elif _is_row_identifier(numeric[c]):
+        # Cùng thứ tự với usable_features() — xem ghi chú ở đó.
+        if _is_row_identifier(numeric[c]):
             identifiers.append(str(c))
+        elif c in categories or looks_like_encoded_category(numeric[c]):
+            encoded.append(str(c))
+        elif is_near_constant(numeric[c].fillna(0.0) if c in declared else numeric[c]):
+            flat.append(str(c))
         else:
             feats.append(c)
+    if encoded:
+        print(f"[PIPELINE] bỏ {len(encoded)} cột danh mục đã mã hoá khỏi feature "
+              f"(khoảng cách giữa các mã không có nghĩa): " + ", ".join(encoded))
     if identifiers:
         print(f"[PIPELINE] bỏ {len(identifiers)} cột định danh khỏi feature: "
               + ", ".join(identifiers))
@@ -785,9 +839,22 @@ def run_persona_pipeline(
     except Exception as e:  # a dictionary problem must not take the run down
         print(f"[PIPELINE] không nạp được khai báo ô trống (bỏ qua): {e}")
 
+    # Cột nào là danh mục thì chỉ file gốc mới biết — xem is_nominal() trong
+    # scripts/build_column_metadata.py. Sau khi tiền xử lý mã hoá, giá trị không còn nói gì.
+    nominal: set[str] = set()
+    try:
+        from api.services.metadata_gate import nominal_columns
+
+        nominal = nominal_columns(label_dir or os.getcwd(), list(data.columns))
+        if nominal:
+            print(f"[PIPELINE] {len(nominal)} cột là danh mục theo file gốc, không dùng làm "
+                  f"feature: " + ", ".join(sorted(nominal)))
+    except Exception as e:
+        print(f"[PIPELINE] không nạp được khai báo cột danh mục (bỏ qua): {e}")
+
     mode = dataset_mode or detect_dataset_mode(data.columns)
     auto_feats = _auto_features(data, cluster_col, exclude={status_col} if status_col else None,
-                                absent_means_zero=absent_zero)
+                                absent_means_zero=absent_zero, nominal=nominal)
     caller_feats = [f for f in (behavioral_features or []) if f != status_col]
 
     # On GENERIC data the pipeline picks the features, not the caller.
@@ -822,7 +889,7 @@ def run_persona_pipeline(
     # inside _auto_features meant the guards ran only when the caller named nothing, and in
     # production the caller always names something — so the path that actually runs was the
     # unprotected one. Auto-selection has already filtered; this is a no-op for it.
-    feats, refused = usable_features(data, feats, absent_means_zero=absent_zero)
+    feats, refused = usable_features(data, feats, absent_means_zero=absent_zero, nominal=nominal)
     if refused:
         print("[PIPELINE] bỏ khỏi feature do caller đề xuất: "
               + ", ".join(f"{c} ({why})" for c, why in refused.items()))

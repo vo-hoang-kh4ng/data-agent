@@ -1,6 +1,8 @@
-# Câu hỏi gửi nghiệp vụ — bản trích xuất `final_churn_VT.csv`
+# Câu hỏi gửi nghiệp vụ — bản trích xuất `RM_add_location.csv`
 
-62.467 dòng · 97 cột · đã nhận 52/97 mô tả xác nhận (cảm ơn anh/chị)
+62.467 dòng · 98 cột · đã nhận 52/98 mô tả xác nhận (cảm ơn anh/chị)
+
+*Bản trước là `final_churn_VT.csv` (97 cột). Bản này thêm `LOCATIONNAME` — xem câu C5.*
 
 Mỗi câu hỏi bên dưới đều kèm con số đo trực tiếp trên file, để anh/chị đối chiếu nhanh.
 Trả lời được câu nào thì điền câu đó, không cần đủ hết.
@@ -9,7 +11,7 @@ Trả lời được câu nào thì điền câu đó, không cần đủ hết.
 
 ## A. 14 cột chưa có mô tả
 
-Đây là các cột còn để trống trong file review (`final_churn_VT_metadata_review.csv`, cột
+Đây là các cột còn để trống trong file review (`RM_add_location_metadata_review.csv`, cột
 `mo_ta_nghiep_vu_xac_nhan`). Tất cả đều gần như đủ dữ liệu, nên chỉ thiếu ý nghĩa.
 
 | Cột | Đã đo được | Cần biết |
@@ -28,6 +30,9 @@ Trả lời được câu nào thì điền câu đó, không cần đủ hết.
 | `HTKT_Net_202604` | thiếu 0,43% | 4 cột `HTKT_Net_*`: khác gì với `HTKT_CHECKLIST_*` cùng tháng? |
 | `HTKT_Net_202605` | thiếu 0,04% | |
 | `HTKT_Net_202606` | đủ dữ liệu, 9 giá trị | |
+
+File review đánh dấu 15 cột cần xác nhận: 14 cột trên, cộng `LOCATIONNAME` — cột mới, hỏi
+riêng ở mục C5.
 
 ---
 
@@ -138,11 +143,47 @@ nhận thêm hai điểm:
    nhóm khôi phục — nếu danh mục mã đầy đủ có nhiều hơn 2 giá trị thì bản trích xuất này
    đang thiếu.
 
+### C5. `LOCATIONNAME` — "Hồ Chí Minh" và "Hồ Chí Minh - Bình Dương" có cộng vào nhau không?
+
+Cột mới, 62.467/62.467 dòng đều có giá trị, **61 khu vực**, không ô trống nào.
+
+Trong 61 giá trị đó có **28 tên ghép** dạng `X - Y`, và **cả 28 tên ghép đều có một tên
+đơn `X` tồn tại song song**:
+
+| tên đơn | số dòng | tên ghép cùng gốc | số dòng |
+|---|---:|---|---:|
+| Ho Chi Minh | 10.829 | Ho Chi Minh - Binh Duong | 4.386 |
+| | | Ho Chi Minh - Vung Tau | 1.846 |
+| Can Tho | 935 | Can Tho - Soc Trang | 787 |
+| | | Can Tho - Hau Giang | 531 |
+| Vinh Long | 247 | Vinh Long - Ben Tre | 421 |
+| | | Vinh Long - Tra Vinh | 246 |
+
+**Câu hỏi:** `Ho Chi Minh - Binh Duong` là một đơn vị **nằm trong** `Ho Chi Minh`, hay là
+một đơn vị **ngang hàng, tách biệt**?
+
+Điều này đổi mọi con số theo vùng: nếu là lồng nhau thì TP.HCM là 17.061 dòng (27,3%),
+nếu tách biệt thì là 10.829 dòng (17,3%).
+
+Hai điểm nhỏ đi kèm:
+
+- `HUE` viết hoa toàn bộ, còn 60 giá trị kia viết hoa chữ đầu. Có phải cùng một cách đặt
+  tên không, hay `HUE` đến từ nguồn khác?
+- Khu vực nhỏ nhất là `Tuyen Quang - Ha Giang` với **27 dòng** trên toàn file. Khi chia
+  tiếp vào 6 nhóm chân dung thì còn khoảng 4–5 người mỗi ô. Anh/chị có muốn đặt **ngưỡng
+  số dòng tối thiểu** để báo cáo không nêu tên khu vực nhỏ như vậy không?
+
+**Về mặt phân tích:** chúng tôi đã đo mức liên hệ giữa khu vực và 6 nhóm chân dung hành vi
+— **Cramér's V = 0,10** trên thang 0–1, tức là **gần như độc lập**. Các nhóm chân dung này
+không phải là nhóm theo vùng; khu vực đông nhất trong mỗi nhóm chênh mặt bằng chung chỉ
+khoảng 1,1–1,6 lần. Vì vậy báo cáo sẽ **không** dựng kết luận theo vùng, trừ khi anh/chị
+xác nhận đây là chiều cần tách riêng.
+
 ---
 
 ## Cách gửi lại
 
-Điền trực tiếp vào file `final_churn_VT_metadata_review.csv` — cột
+Điền trực tiếp vào file `RM_add_location_metadata_review.csv` — cột
 `mo_ta_nghiep_vu_xac_nhan` cho phần A/B, cột `o_trong_nghia_la` cho phần C1 — hoặc trả
 lời thẳng trong file này cũng được — chúng tôi đọc được cả hai định dạng, kể cả
 khi anh/chị sửa đè lên cột mô tả hoặc đổi tên tiêu đề cột.

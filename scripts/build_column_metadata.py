@@ -293,6 +293,34 @@ def load_group_overrides(review_path: Path) -> dict[str, str]:
     }
 
 
+def is_nominal(series: pd.Series) -> bool:
+    """True when the column holds NAMES rather than quantities.
+
+    Ghi lại ở đây vì đây là chỗ DUY NHẤT còn nhìn thấy file gốc. Khung dữ liệu mà pipeline
+    nhận do một script LLM sinh ra mỗi lần chạy, và mã hoá cột phân loại là bước chuẩn bị
+    dữ liệu cho KMeans thông thường nhất trên đời. Sau `pd.factorize`, `LOCATIONNAME` là 61
+    mã nguyên liền mạch — không còn gì trong giá trị nói rằng nó từng là "Ha Noi", nên nếu
+    không ghi lại ngay từ đây thì không ai biết nữa.
+
+    Phép thử là giá trị có ĐỌC ĐƯỢC thành số không, không phải dtype pandas đoán:
+    `CHECKLIST_DUPLICATED_202606` mang True/False và ra dtype `object`, nhưng nó là cờ hành
+    vi thật — gắn nhãn danh mục cho nó là xoá nó khỏi phép phân cụm.
+
+    Args:
+        series: Một cột của file gốc.
+
+    Returns:
+        Cột có phải danh mục hay không. Cột rỗng trả về False — không có bằng chứng.
+    """
+    values = series.dropna()
+    if len(values) == 0 or pd.api.types.is_numeric_dtype(series):
+        return False
+    if pd.api.types.is_bool_dtype(values.infer_objects()):
+        return False
+    unreadable = pd.to_numeric(values, errors="coerce").isna()
+    return bool(unreadable.mean() > 0.5)
+
+
 def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Path, int, int]:
     stem = csv_path.stem
     json_path = csv_path.with_name(f"{stem}_metadata.json")
@@ -317,6 +345,7 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
         is_confirmed = name in confirmed
         numeric = pd.api.types.is_numeric_dtype(series)
         non_null = int(series.notna().sum())
+        nominal = is_nominal(series)
 
         # `sample` là TRUNG VỊ, không phải giá trị của một bản ghi cụ thể — xem docstring.
         if numeric and non_null:
@@ -339,6 +368,8 @@ def build(csv_path: Path, returned_review: Path | None = None) -> tuple[Path, Pa
             # "zero" = ô trống nghĩa là không phát sinh (điền 0); "unmeasured" = không đo
             # (phải loại); "" = chưa ai khai báo, phía dùng giữ mặc định thận trọng.
             "absent_means": absent_means,
+            # Đo trên FILE GỐC, trước mọi bước tiền xử lý — xem is_nominal().
+            "nominal": nominal,
         })
         review_rows.append({
             "cot": str(name),
