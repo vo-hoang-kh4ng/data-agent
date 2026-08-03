@@ -64,6 +64,24 @@ export interface Persona {
   /** Measured share still a customer, or null/undefined when nobody named which status
    *  values mean "active". Absent is NOT the same as zero. */
   active_pct?: number | null;
+  /** How this group is distributed across each categorical column, ALWAYS carrying the
+   *  share the same value holds across the whole dataset. A share on its own reads as a
+   *  finding: 18.6% of one group in Ha Noi looks like concentration until you see Ha Noi
+   *  is 16.5% of the file. `value: null` is the remainder of cells too small to name.
+   *  See pipeline.category_mix. */
+  category_mix?: Record<string, CategoryShare[]>;
+  /** Business label per categorical column, so the UI shows "Khu vực" not "LOCATIONNAME". */
+  category_labels?: Record<string, string>;
+}
+
+export interface CategoryShare {
+  /** null means "everything below the naming floor", pooled — see pipeline._MIN_CATEGORY_CELL. */
+  value: string | null;
+  rows: number;
+  share: number;
+  dataset_share: number | null;
+  /** share / dataset_share, or null when the value is absent from the dataset. */
+  lift: number | null;
 }
 
 interface PersonaDashboardProps {

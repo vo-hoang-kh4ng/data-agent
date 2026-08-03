@@ -79,6 +79,14 @@ _REDUNDANCY_THRESHOLD = 0.95
 #: looks_like_encoded_category().
 _MIN_CATEGORY_CODES = 20
 
+#: Số dòng tối thiểu để một giá trị danh mục được GỌI TÊN trong mô tả nhóm. Khu vực nhỏ
+#: nhất của bản trích xuất có 27 dòng trên 62.467; chia vào sáu nhóm còn bốn năm người.
+#: Dưới ngưỡng thì vẫn được đếm, chỉ không nêu tên. Xem category_mix().
+_MIN_CATEGORY_CELL = 30
+
+#: Số giá trị danh mục được gọi tên nhiều nhất trong một nhóm.
+_TOP_CATEGORY_VALUES = 5
+
 #: Name for a GENERIC cluster that deviates on nothing. States what was measured and
 #: assumes nothing about what the dataset describes.
 _NEAR_MEAN_NAME = "Nhóm gần trung bình toàn tập"
@@ -544,6 +552,101 @@ def feature_coverage(data: pd.DataFrame, feats, modes: dict | None = None) -> di
     return coverage
 
 
+def category_mix(group: pd.Series, dataset: pd.Series, min_rows: int = _MIN_CATEGORY_CELL,
+                 top_n: int = _TOP_CATEGORY_VALUES) -> list[dict[str, Any]]:
+    """Một nhóm phân bố thế nào trên một cột danh mục, KÈM phân bố của toàn tập.
+
+    Tỉ lệ trần đọc lên như một phát hiện: "18,6% nhóm này ở Hà Nội" nghe như Hà Nội nổi
+    trội, cho tới khi thấy Hà Nội chiếm 16,6% cả file. Đo trên 6 chân dung toàn quốc, vùng
+    tập trung nhất trong các nhóm lớn chỉ hơn mặt bằng 1,1–1,6 lần, và khu vực giải thích
+    2,51% phương sai hành vi so với mốc nhiễu 0,10%. Nên mỗi tỉ lệ đi kèm tỉ lệ toàn tập mà
+    nó phải được đọc cùng — đúng quy tắc feature_coverage: một nhóm được đặc trưng bởi việc
+    KHÁC mặt bằng chung, không phải bởi việc chứa nhiều thứ vốn đâu cũng nhiều.
+
+    Ô nhỏ thì ĐẾM chứ không GỌI TÊN: khu vực nhỏ nhất có 27 dòng trên 62.467, chia vào sáu
+    nhóm còn bốn năm người. Một dòng báo cáo gọi tên khu vực dựa trên bốn khách hàng đã rời
+    mạng vừa là nhiễu vừa gần với việc định danh được. Phần bị gộp trả về với ``value=None``
+    — giấu tên không phải là bỏ người đó khỏi nhóm.
+
+    Giá trị giữ NGUYÊN VĂN. 28/61 giá trị là tên ghép ("Ho Chi Minh - Binh Duong") và cả 28
+    đều có tên đơn song song; tên ghép có gộp vào tên đơn hay không là câu C5 đang chờ
+    nghiệp vụ, và đoán thì TP.HCM xê dịch giữa 17,3% và 27,3% file.
+
+    Args:
+        group: Giá trị danh mục của riêng nhóm.
+        dataset: Giá trị danh mục của toàn tập, làm mặt bằng so sánh.
+        min_rows: Số dòng tối thiểu để một giá trị được gọi tên.
+        top_n: Số giá trị được gọi tên nhiều nhất.
+
+    Returns:
+        Danh sách theo tỉ trọng giảm dần, mỗi phần tử có ``value``/``rows``/``share``/
+        ``dataset_share``/``lift``. ``value=None`` là phần gộp. ``lift=None`` khi giá trị
+        không có trong toàn tập — không có mẫu số thì không có bội số.
+    """
+    present = group.dropna()
+    total = len(present)
+    if total == 0:
+        return []
+
+    baseline = dataset.dropna().value_counts(normalize=True)
+    counts = present.value_counts()
+    named = [v for v in counts.index if counts[v] >= min_rows][:top_n]
+
+    entries: list[dict[str, Any]] = []
+    for value in named:
+        rows = int(counts[value])
+        share = float(baseline.get(value, 0.0))
+        entries.append({
+            "value": str(value),
+            "rows": rows,
+            "share": rows / total,
+            "dataset_share": share,
+            "lift": (rows / total) / share if share else None,
+        })
+
+    remainder = total - sum(e["rows"] for e in entries)
+    if remainder:
+        entries.append({"value": None, "rows": remainder, "share": remainder / total,
+                        "dataset_share": None, "lift": None})
+    return entries
+
+
+def describable_categories(data: pd.DataFrame, declared: set[str] | None = None) -> list[str]:
+    """Cột danh mục nào đáng dùng để MÔ TẢ nhóm.
+
+    Khác với việc chọn feature: ở đây cột danh mục là thứ ta muốn, không phải thứ ta loại.
+    Nhưng một cột mà mỗi dòng một giá trị thì bảng phân bố sẽ là mỗi dòng một mục — đó là
+    danh sách khách hàng, không phải mô tả nhóm.
+
+    Phép thử là giá trị có ĐỌC ĐƯỢC thành số không, không phải dtype pandas đoán — cùng một
+    phép thử với ``is_nominal()`` bên scripts/build_column_metadata.py, để hai đầu của cơ
+    chế này không trôi khỏi nhau. Chỉ kiểm dtype là không đủ, và chỗ đó lộ ra khi chạy file
+    thật: bốn cột ``CHECKLIST_DUPLICATED_*`` mang True/False và `read_csv` trả về dtype
+    `object`, nên chúng lọt vào mô tả nhóm với bảng phân bố hai giá trị chỉ nhắc lại đúng
+    con số trung bình mà phần thống kê feature đã in.
+
+    Args:
+        data: Bộ dữ liệu.
+        declared: Cột được metadata khai báo là danh mục, kể cả khi đã bị mã hoá thành số.
+
+    Returns:
+        Tên cột, theo thứ tự trong DataFrame.
+    """
+    columns: list[str] = []
+    for name in data.columns:
+        series = data[name]
+        present = series.dropna()
+        if len(present) < 2 or present.nunique() == len(present):
+            continue
+        if name not in (declared or ()):
+            if pd.api.types.is_numeric_dtype(series):
+                continue
+            if bool(pd.to_numeric(present, errors="coerce").notna().mean() > 0.5):
+                continue
+        columns.append(str(name))
+    return columns
+
+
 def cohort_mix(statuses: pd.Series) -> dict[str, float]:
     """Measure the share of each outcome present in ``statuses``.
 
@@ -752,6 +855,7 @@ def _failed_persona(data: pd.DataFrame, reason: str) -> list[dict]:
         "priority_score": 10,
         "feature_means": {},
         "evidence": {},
+        "category_mix": {},
         "profile_attributes": {},
         "domain_signature": {},
         "temporal_trajectory": [],
@@ -990,6 +1094,16 @@ def run_persona_pipeline(
     # what is usual across the file, not against what is usual inside that cluster.
     dataset_modes = modal_values(data, feats)
 
+    # Cột danh mục mô tả nhóm chứ không phân cụm nhóm — khu vực giải thích 2,51% phương sai
+    # hành vi (mốc nhiễu 0,10%) và Cramér's V với cụm là 0,10, nên nó là bối cảnh, không
+    # phải chiều phân tích. Mặt bằng toàn tập đi kèm để không ai đọc 18,6% Hà Nội thành
+    # phát hiện khi Hà Nội vốn chiếm 16,6% cả file.
+    category_cols = [c for c in describable_categories(data, declared=nominal)
+                     if c not in {cluster_col, status_col}]
+    if category_cols:
+        print(f"[PIPELINE] mô tả nhóm theo {len(category_cols)} cột danh mục: "
+              + ", ".join(category_cols))
+
     personas: list[dict[str, Any]] = []
     for cid in sorted(cluster_sizes):
         meta = metadata[cid]
@@ -1002,7 +1116,16 @@ def run_persona_pipeline(
         }
         is_anomaly = meta["persona_type"] == "ANOMALY"
         name = "Hành vi bất thường" if is_anomaly else final_names[cid]
+        rows_in_cluster = data[cluster_col] == cid
         personas.append({
+            "category_mix": {
+                col: category_mix(data.loc[rows_in_cluster, col], data[col])
+                for col in category_cols
+            },
+            # Đi kèm persona để tầng báo cáo không phải dựng luồng nhãn riêng.
+            "category_labels": {
+                col: column_labels[col] for col in category_cols if col in column_labels
+            },
             "cluster_id": int(cid),
             "support": int(cluster_sizes[cid]),
             "support_pct": cluster_sizes[cid] / len(data),

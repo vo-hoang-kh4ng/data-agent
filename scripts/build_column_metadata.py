@@ -37,6 +37,10 @@ import pandas as pd
 #: Độ tin cậy "thấp"/"không" là tín hiệu để script đánh dấu cột đó CẦN XÁC NHẬN.
 NAMING_RULES: list[tuple[str, str, str, str]] = [
     (r"^OBJID$", "Định danh", "Mã định danh thuê bao.", "cao"),
+    # Nghiệp vụ đã nói thẳng khi gửi RM_add_location.csv: "cột khu vực của KH". Ghi lại ở
+    # đây thay vì để nhãn rơi về "Không khớp quy ước đặt tên nào đã biết", vốn sẽ hiện
+    # nguyên văn trong báo cáo. Vẫn để `can_xac_nhan` mở — cách gộp tên vùng là câu C5.
+    (r"^LOCATIONNAME$", "Khu vực", "Khu vực của khách hàng.", "cao"),
     (r"^FILTER_(MONTH|YEAR)$", "Bộ lọc", "Tháng/năm của kỳ trích xuất dữ liệu — metadata của lần trích, không phải hành vi khách hàng.", "cao"),
     (r"^fee_total$", "Cước phí", "Tổng cước phí trong kỳ quan sát.", "cao"),
     (r"^fee_avg$", "Cước phí", "Cước phí trung bình mỗi tháng.", "cao"),

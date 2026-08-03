@@ -514,6 +514,61 @@ _QUALIFIER_WINDOW = 24
 #: ReportGenerator._top_signals_covered().
 _MIN_SIGNAL_COVERAGE = 0.20
 
+#: Bội số so với toàn tập, dưới mức này thì nhóm phân bố như mọi người và câu chữ phải nói
+#: ra điều đó. 1,25 nghĩa là chiếm nhiều hơn mặt bằng một phần tư — đo trên bản trích xuất
+#: thật, các nhóm lớn nằm trong khoảng 1,1–1,6. Xem format_category_mix().
+_CATEGORY_LIFT_FLOOR = 1.25
+
+
+def _pct(value) -> str:
+    """Phần trăm theo dấu phẩy thập phân, đúng quy ước phần còn lại của báo cáo."""
+    return f"{value * 100:.1f}".replace(".", ",") + "%"
+
+
+def format_category_mix(label, entries) -> str:
+    """Một dòng phân bố của nhóm trên một cột danh mục, KHÔNG BAO GIỜ thiếu mặt bằng chung.
+
+    "18,6% nhóm này ở Hà Nội" đọc lên như tập trung, cho tới khi biết Hà Nội chiếm 16,6%
+    toàn bộ bản trích xuất. Trên sáu chân dung toàn quốc, vùng tập trung nhất trong các nhóm
+    lớn chỉ hơn mặt bằng 1,1–1,6 lần; khu vực giải thích 2,51% phương sai hành vi so với mốc
+    nhiễu 0,10%, và Cramér's V giữa khu vực và cụm là 0,10.
+
+    Nên không tỉ lệ nào đứng một mình, và khi không có gì lệch khỏi mặt bằng thì nói thẳng
+    bằng chữ — người đọc lướt qua con số rồi dừng lại vẫn phải rút ra đúng kết luận.
+
+    Args:
+        label: Nhãn nghiệp vụ của cột (hoặc chính tên cột nếu chưa có nhãn).
+        entries: Kết quả của :func:`triadic_dgm.persona.pipeline.category_mix`.
+
+    Returns:
+        Một dòng, hoặc chuỗi rỗng khi không có gì để nói.
+    """
+    if not entries:
+        return ""
+
+    parts, lifts = [], []
+    for entry in entries:
+        value = entry.get("value")
+        share = _pct(entry.get("share") or 0.0)
+        if value is None:
+            parts.append(f"còn lại {share}")
+            continue
+        base = entry.get("dataset_share")
+        lift = entry.get("lift")
+        if lift is not None:
+            lifts.append(lift)
+        if base:
+            suffix = f" (toàn tập {_pct(base)}"
+            suffix += f", {lift:.1f}".replace(".", ",") + " lần)" if lift and lift >= _CATEGORY_LIFT_FLOOR else ")"
+        else:
+            suffix = ""
+        parts.append(f"{value} {share}{suffix}")
+
+    line = f"{label}: " + " · ".join(parts)
+    if lifts and max(lifts) < _CATEGORY_LIFT_FLOOR:
+        line += " — phân bố gần như mặt bằng chung"
+    return line
+
 
 def correct_group_count(text, actual_count):
     """Rewrite any stated number of personas to the number actually rendered.
@@ -2178,6 +2233,65 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
             conclusion="Báo cáo được tạo với dữ liệu và phân tích đầy đủ; phần diễn giải mở rộng từ AI tạm thời không khả dụng do lỗi kết nối dịch vụ."
         )
 
+    def _render_persona_sections(self, personas_data, global_means, narrative_dict,
+                                 column_labels=None, display_name_map=None) -> str:
+        """The Persona Overview cards — one per persona.
+
+        Extracted from render_markdown so the category breakdown added here is reachable
+        from a test without building a whole report around it.
+        """
+        column_labels = column_labels or {}
+        display_name_map = display_name_map or {}
+        narrative_dict = narrative_dict or {}
+        md = ""
+        for p in personas_data:
+            cid = p.get('cluster_id')
+            p_name = display_name_map.get(cid, self.clean_persona_name(p.get('persona_name', 'Unknown')))
+            icon = self._get_persona_icon(p_name)
+            tag = self._get_intensity_tag(p)
+            sup_pct = p.get('support_pct', 0) * 100
+            sup_str = self.format_support(p.get('support', 0))
+
+            md += f"### {icon} {p_name} — {sup_pct:.1f}% ({tag})\n\n"
+            # Severity/Risk are nulled for GENERIC datasets (no such concept) — omit them entirely
+            # rather than printing "None"/"N/A" noise on every persona line.
+            meta_bits = [f"Quy mô: {sup_str}"]
+            if p.get('severity'):
+                meta_bits.append(f"Severity: {p['severity']}")
+            if p.get('risk'):
+                meta_bits.append(f"Risk: {p['risk']}")
+            md += f"*{' | '.join(meta_bits)}*\n\n"
+
+            # Mỗi tỉ lệ đi kèm tỉ lệ toàn tập. "18,6% nhóm này ở Hà Nội" đọc như tập trung,
+            # trong khi Hà Nội chiếm 16,6% cả file — xem format_category_mix().
+            for column, entries in (p.get('category_mix') or {}).items():
+                line = format_category_mix(column_labels.get(column, column), entries)
+                if line:
+                    md += f"*{line}*\n\n"
+
+            story = self._build_persona_story(p, global_means)
+            n = narrative_dict.get(cid)
+            llm_text = getattr(n, 'business_interpretation', None) if n else None
+            if story:
+                # story != None => POST_CHURN (có churn_driver) => đã gửi churn_story_facts cho LLM
+                # viết lại tự nhiên hơn. Ưu tiên bản LLM khi có, fallback về bản ghép cứng khi LLM
+                # lỗi/timeout/trả rỗng — layer Insight không bao giờ mất, chỉ mất phần "đa dạng câu chữ".
+                md += f"{llm_text if llm_text else story}\n\n"
+            elif llm_text:
+                md += f"{llm_text}\n\n"
+            else:
+                # LLM narrative không khả dụng (timeout/lỗi kết nối) — vẫn ưu tiên 1 đoạn văn
+                # deterministic ghép từ profile_context/contradictions thay vì rơi thẳng xuống
+                # bullet rời rạc, để card Overview không bao giờ trông như "cluster thống kê".
+                insight = self._compose_deterministic_insight(p, global_means)
+                if insight:
+                    md += f"{insight}\n\n"
+                else:
+                    for b in self._get_evidence_bullets(p, global_means, top_n=3):
+                        md += f"- {b}\n"
+                    md += "\n"
+        return md
+
     def render_markdown(self, raw_python_output: str, profile=None) -> str:
         personas_data = self.extract_json(raw_python_output)
         if not personas_data:
@@ -2285,45 +2399,14 @@ Dữ liệu Business Facts duy nhất bạn được thấy:
         # — phát hiện trên báo cáo thật), fallback về story composer deterministic khi LLM lỗi/timeout/
         # rỗng; các persona khác dùng business_interpretation LLM tổng hợp từ domain_signals/
         # business_signals như cũ (đã sterilize, không tự bịa số liệu/domain).
-        md += "## 3. Persona Overview\n\n"
-        for p in personas_data:
-            cid = p.get('cluster_id')
-            p_name = display_name_map.get(cid, self.clean_persona_name(p.get('persona_name', 'Unknown')))
-            icon = self._get_persona_icon(p_name)
-            tag = self._get_intensity_tag(p)
-            sup_pct = p.get('support_pct', 0) * 100
-            sup_str = self.format_support(p.get('support', 0))
+        # Nhãn nghiệp vụ của cột danh mục đi kèm chính persona, nên không cần luồng riêng.
+        column_labels: dict = {}
+        for _p in personas_data:
+            column_labels.update(_p.get('category_labels') or {})
 
-            md += f"### {icon} {p_name} — {sup_pct:.1f}% ({tag})\n\n"
-            # Severity/Risk are nulled for GENERIC datasets (no such concept) — omit them entirely
-            # rather than printing "None"/"N/A" noise on every persona line.
-            meta_bits = [f"Quy mô: {sup_str}"]
-            if p.get('severity'):
-                meta_bits.append(f"Severity: {p['severity']}")
-            if p.get('risk'):
-                meta_bits.append(f"Risk: {p['risk']}")
-            md += f"*{' | '.join(meta_bits)}*\n\n"
-            story = self._build_persona_story(p, global_means)
-            n = narrative_dict.get(cid)
-            llm_text = getattr(n, 'business_interpretation', None) if n else None
-            if story:
-                # story != None => POST_CHURN (có churn_driver) => đã gửi churn_story_facts cho LLM
-                # viết lại tự nhiên hơn. Ưu tiên bản LLM khi có, fallback về bản ghép cứng khi LLM
-                # lỗi/timeout/trả rỗng — layer Insight không bao giờ mất, chỉ mất phần "đa dạng câu chữ".
-                md += f"{llm_text if llm_text else story}\n\n"
-            elif llm_text:
-                md += f"{llm_text}\n\n"
-            else:
-                # LLM narrative không khả dụng (timeout/lỗi kết nối) — vẫn ưu tiên 1 đoạn văn
-                # deterministic ghép từ profile_context/contradictions thay vì rơi thẳng xuống
-                # bullet rời rạc, để card Overview không bao giờ trông như "cluster thống kê".
-                insight = self._compose_deterministic_insight(p, global_means)
-                if insight:
-                    md += f"{insight}\n\n"
-                else:
-                    for b in self._get_evidence_bullets(p, global_means, top_n=3):
-                        md += f"- {b}\n"
-                    md += "\n"
+        md += "## 3. Persona Overview\n\n"
+        md += self._render_persona_sections(personas_data, global_means, narrative_dict,
+                                            column_labels, display_name_map)
 
         # Risk Tier Grouping (only if at least one persona has risk_tier computed) — mỗi persona
         # kèm 1 dòng "why" lấy từ tín hiệu lệch mạnh nhất thực tế của chính nó (không suy diễn thêm).

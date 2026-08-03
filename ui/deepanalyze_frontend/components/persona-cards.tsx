@@ -337,6 +337,60 @@ function attachRecommendedScripts(persona: Persona): { category: string; script:
   return scripts;
 }
 
+/** Multiple of the dataset share below which a group is distributed like everyone else.
+ *  Mirrors _CATEGORY_LIFT_FLOOR in triadic_dgm/services/report_generator.py — the card and
+ *  the markdown report must not disagree about whether a concentration is real. */
+const CATEGORY_LIFT_FLOOR = 1.25;
+
+const pct = (v: number) => `${(v * 100).toFixed(1).replace(".", ",")}%`;
+
+/**
+ * One line per categorical column: how the group is distributed, ALWAYS with the share the
+ * same value holds across the whole file.
+ *
+ * A bare share reads as a finding. "18,6% nhóm này ở Hà Nội" looks like concentration until
+ * you see Ha Noi is 16,5% of the export. Measured across the six national personas, the
+ * strongest concentration in the large groups runs 1,1–1,6× the national share; region
+ * explains 2,51% of behavioural variance against a 0,10% noise floor. So when nothing
+ * departs from the file the line says so in words — a reader who skims the numbers and
+ * stops still comes away with the right conclusion.
+ *
+ * Mirrors format_category_mix() in report_generator.py.
+ */
+function formatCategoryMixLines(p: Persona): string[] {
+  const mix = p.category_mix;
+  if (!mix) return [];
+  const labels = p.category_labels || {};
+  const lines: string[] = [];
+  for (const [column, entries] of Object.entries(mix)) {
+    if (!entries || entries.length === 0) continue;
+    const parts: string[] = [];
+    const lifts: number[] = [];
+    for (const e of entries) {
+      if (e.value === null) {
+        parts.push(`còn lại ${pct(e.share)}`);
+        continue;
+      }
+      if (e.lift !== null && e.lift !== undefined) lifts.push(e.lift);
+      const base = e.dataset_share;
+      let suffix = "";
+      if (base) {
+        suffix =
+          e.lift && e.lift >= CATEGORY_LIFT_FLOOR
+            ? ` (toàn tập ${pct(base)}, ${e.lift.toFixed(1).replace(".", ",")} lần)`
+            : ` (toàn tập ${pct(base)})`;
+      }
+      parts.push(`${e.value} ${pct(e.share)}${suffix}`);
+    }
+    let line = `${labels[column] || column}: ${parts.join(" · ")}`;
+    if (lifts.length > 0 && Math.max(...lifts) < CATEGORY_LIFT_FLOOR) {
+      line += " — phân bố gần như mặt bằng chung";
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
 export function PersonaCards({ data }: PersonaCardsProps) {
   let actualData = data;
   if (data && !Array.isArray(data) && Array.isArray((data as any).personas)) {
@@ -385,6 +439,11 @@ export function PersonaCards({ data }: PersonaCardsProps) {
                     <li key={i}>{b}</li>
                   ))}
                 </ul>
+                {formatCategoryMixLines(p).map((line, i) => (
+                  <p key={i} className="text-[11px] text-muted-foreground mt-2 leading-snug">
+                    {line}
+                  </p>
+                ))}
               </CardContent>
             </Card>
           );
