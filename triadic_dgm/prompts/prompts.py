@@ -33,8 +33,7 @@ Remember 2 points:
 1. You should work in the path: {working_path} for saving outputs like plots or models. For loading datasets, YOU MUST USE `load_dataset()` without any arguments to auto-select the latest active dataset. ABSOLUTELY DO NOT HARDCODE OLD FILE IDs LIKE `load_dataset('a9b43613')` FROM CHAT HISTORY!
 2. For your code, you should try to show some visible results, for example:
    (1). For data processing, using 'data.head()' after processing. Then the data will display in the dialogue.
-   (2). For ANY data loading, overview, or Exploratory Data Analysis task, you MUST proactively use `matplotlib` or `seaborn` to draw overview charts (e.g., target variable distribution, correlations) to give the user an immediate visual understanding. 
-   *** CRITICAL: YOUR PYTHON CODE MUST CONTAIN 'import matplotlib.pyplot as plt' AND CALL 'plt.show()' AT LEAST ONCE IN EVERY EDA SCRIPT. DO NOT JUST PRINT TEXT STATISTICS! YOU WILL BE PENALIZED IF NO CHARTS ARE DRAWN! ***
+   (2). For ANY data loading, overview or EDA task, draw overview charts (e.g. target distribution, correlations) — not text statistics alone. Your code MUST contain 'import matplotlib.pyplot as plt' and call 'plt.show()' at least once.
    (3). For modeling, use 'joblib.dump(model, {working_path})' or other method to save the model after training. Then the model will display in the dialogue.
 You should follow this instruction in all subsequent conversation. 
 CRITICAL REQUIREMENT: YOU MUST NOT output any analysis, explanation, or markdown text immediately after your code block. You must wait for the actual execution result from the Sandbox. Do not fabricate or hallucinate results! Make sure to properly close your code block with ``` before halting!
@@ -54,32 +53,16 @@ trong báo cáo JSON. TUYỆT ĐỐI KHÔNG lấy một biến hành vi bất k�
 thu (kiểu `<một cột đếm> * 2`)! (Nếu biến hành vi thực sự có
 variance = 0 — TỰ KIỂM TRA THẬT trên dữ liệu, KHÔNG giả định trước — pipeline K-Means/Stage-2/
 OUTLIER_DRIVEN ở các mục bên dưới đã có cơ chế fallback tương ứng, không cần xử lý riêng ở đây.)
-2. FEATURE EXCLUSION GATE & ANTI-HALLUCINATION: BẮT BUỘC dùng CHÍNH XÁC danh sách `behavioral_features` đã được liệt kê trong yêu cầu ở trên (danh sách này do hệ thống tự suy ra từ CHÍNH dataset đang phân tích — KHÔNG được tự chọn cột theo tên cột hardcode từ trí nhớ về một dataset khác — tên cột của dataset NÀY là thứ duy nhất hợp lệ). Nếu yêu cầu KHÔNG có sẵn danh sách features, tự chọn các cột SỐ có ý nghĩa hành vi/mô tả, LOẠI BỎ cột ID, cột hằng số/near-constant, và (nếu tồn tại trong dataset này) các cột chỉ dùng để tính doanh thu/giá (nếu dataset này có), nhận biết qua ngữ nghĩa tên cột chứ không qua danh sách cố định — các biến này chỉ dùng để tính Revenue Impact sau khi cluster xong, không phải feature clustering. KHÔNG ĐƯỢC TỰ BỊA RA TÊN CỘT ảo. BẠN BẮT BUỘC PHẢI lưu tập features dùng để train KMeans ra file trung gian `intermediate_features.csv` để người dùng kiểm định! LOẠI BỎ khỏi tập train: cột định danh, cột địa danh/mã vùng, và các cột đơn giá/doanh thu — nhận biết qua ngữ nghĩa tên cột CỦA CHÍNH DATASET NÀY. TUYỆT ĐỐI CẤM đưa các cột do CHÍNH PIPELINE này sinh ra (`cluster`, `persona_text`, `is_anomaly`, `priority_score`) vào `behavioral_features` — nếu để lọt, `cluster_stats`/`global_mean`/`evidence` sẽ hiện ra dòng "cluster tăng rất mạnh" vô nghĩa trong báo cáo cuối cùng.
-3. FEATURE PREPARATION & TYPE ERROR PREVENTION: LUÔN sử dụng ĐÚNG danh sách `behavioral_features` đã chốt ở mục 2 phía trên (KHÔNG tự suy diễn thêm biến tổng hợp/thời gian nào khác ngoài danh sách đó — nếu dataset này có sẵn các cột tổng hợp như `Total_`/`TOTAL_`, chúng CHỈ được dùng khi đã nằm trong `behavioral_features`). CỰC KỲ CHÚ Ý: Dataset có nhiều cột chứa String/Text. NGAY SAU KHI `behavioral_features` được chốt danh sách cuối cùng (TRƯỚC KHI build `X`/train KMeans), BẮT BUỘC chạy ĐÚNG dòng sau để ép kiểu SỐ NGAY TRÊN `data` GỐC (không chỉ ép kiểu trên 1 bản sao/matrix riêng để train KMeans — nếu chỉ ép kiểu trên bản sao, các bước SAU đó như `cluster_stats = data.groupby('cluster')[behavioral_features].mean()` vẫn sẽ dùng cột String gốc và ném lỗi `TypeError: can only concatenate str (not "int") to str`, lỗi này ĐÃ XẢY RA TRÊN DỮ LIỆU THẬT):
+3. FEATURE EXCLUSION GATE & ANTI-HALLUCINATION: BẮT BUỘC dùng CHÍNH XÁC danh sách `behavioral_features` đã được liệt kê trong yêu cầu ở trên (danh sách này do hệ thống tự suy ra từ CHÍNH dataset đang phân tích — KHÔNG được tự chọn cột theo tên cột hardcode từ trí nhớ về một dataset khác — tên cột của dataset NÀY là thứ duy nhất hợp lệ). Nếu yêu cầu KHÔNG có sẵn danh sách features, tự chọn các cột SỐ có ý nghĩa hành vi/mô tả, LOẠI BỎ cột ID, cột hằng số/near-constant, và (nếu tồn tại trong dataset này) các cột chỉ dùng để tính doanh thu/giá (nếu dataset này có), nhận biết qua ngữ nghĩa tên cột chứ không qua danh sách cố định — các biến này chỉ dùng để tính Revenue Impact sau khi cluster xong, không phải feature clustering. KHÔNG ĐƯỢC TỰ BỊA RA TÊN CỘT ảo. BẠN BẮT BUỘC PHẢI lưu tập features dùng để train KMeans ra file trung gian `intermediate_features.csv` để người dùng kiểm định! LOẠI BỎ khỏi tập train: cột định danh, cột địa danh/mã vùng, và các cột đơn giá/doanh thu — nhận biết qua ngữ nghĩa tên cột CỦA CHÍNH DATASET NÀY. TUYỆT ĐỐI CẤM đưa các cột do CHÍNH PIPELINE này sinh ra (`cluster`, `persona_text`, `is_anomaly`, `priority_score`) vào `behavioral_features` — nếu để lọt, `cluster_stats`/`global_mean`/`evidence` sẽ hiện ra dòng "cluster tăng rất mạnh" vô nghĩa trong báo cáo cuối cùng.
+4. FEATURE PREPARATION & TYPE ERROR PREVENTION: LUÔN sử dụng ĐÚNG danh sách `behavioral_features` đã chốt ở mục 3 phía trên (KHÔNG tự suy diễn thêm biến tổng hợp/thời gian nào khác ngoài danh sách đó — nếu dataset này có sẵn các cột tổng hợp như `Total_`/`TOTAL_`, chúng CHỈ được dùng khi đã nằm trong `behavioral_features`). CỰC KỲ CHÚ Ý: Dataset có nhiều cột chứa String/Text. NGAY SAU KHI `behavioral_features` được chốt danh sách cuối cùng (TRƯỚC KHI build `X`/train KMeans), BẮT BUỘC chạy ĐÚNG dòng sau để ép kiểu SỐ NGAY TRÊN `data` GỐC (không chỉ ép kiểu trên 1 bản sao/matrix riêng để train KMeans — nếu chỉ ép kiểu trên bản sao, các bước SAU đó như `cluster_stats = data.groupby('cluster')[behavioral_features].mean()` vẫn sẽ dùng cột String gốc và ném lỗi `TypeError: can only concatenate str (not "int") to str`, lỗi này ĐÃ XẢY RA TRÊN DỮ LIỆU THẬT):
 ```python
 data[behavioral_features] = data[behavioral_features].apply(lambda c: pd.to_numeric(c, errors='coerce')).fillna(0)
 ```
 Sau dòng này, MỌI cột trong `behavioral_features` (dùng để train KMeans, tính `cluster_stats`, `global_mean`, Decision Tree...) đều đã là số — không cần ép kiểu lại ở nơi khác.
-3b. ĐƯỜNG MẶC ĐỊNH — GỌI PIPELINE CÓ SẴN, KHÔNG TỰ VIẾT LẠI (ƯU TIÊN CAO NHẤT, GHI ĐÈ MỌI HƯỚNG DẪN Ở CÁC MỤC 4, 4b, 5, 6, 6b, 11 BÊN DƯỚI):
-Toàn bộ phần phân cụm + business rules + profiling + Stage-2 + sinh JSON persona ĐÃ ĐƯỢC ĐÓNG GÓI THÀNH CODE PYTHON CỐ ĐỊNH trong repo, đã có unit test, chạy giống hệt nhau mọi lần. Với yêu cầu phân cụm/persona THÔNG THƯỜNG, chỉ cần gõ ĐÚNG đoạn dưới đây — KHÔNG copy-paste lại các hàm dài ở mục 4/4b/5/6/11:
+5. ĐƯỜNG MẶC ĐỊNH — GỌI PIPELINE CÓ SẴN, KHÔNG TỰ VIẾT LẠI (ƯU TIÊN CAO NHẤT):
+Toàn bộ phân cụm + business rules + profiling + Stage-2 + hidden drivers + sinh JSON persona đã nằm trong `triadic_dgm/persona/pipeline.py` — code Python cố định, có unit test, chạy giống hệt nhau mọi lần. Với yêu cầu phân cụm/persona THÔNG THƯỜNG, chỉ cần gõ ĐÚNG đoạn dưới đây.
+LÝ DO (đã xảy ra trên dữ liệu thật, nhiều lần): các bước này từng được mô tả bằng ~800 dòng văn bản ngay trong prompt và bạn phải gõ lại mỗi lần; mỗi lần chạy ra một phiên bản code khác nhau, chỉ cần 1 lỗi là vòng sửa lỗi bắt đầu viết lại script theo trí nhớ và trôi xa dần bản gốc (NameError -> KeyError -> hết 5 lượt retry -> người dùng KHÔNG nhận được báo cáo nào). Vì vậy chúng đã bị XOÁ khỏi prompt: KHÔNG có gì để bạn chép lại nữa.
 MỘT KHỐI CODE DUY NHẤT, KHÔNG CHIA LƯỢT: khối code bạn viết phải đi trọn từ load dữ liệu → chốt `behavioral_features` → lưu `intermediate_features.csv` → gọi `run_persona_pipeline` → in JSON persona. TUYỆT ĐỐI KHÔNG kết thúc lượt trả lời sau khi mới chọn xong feature để "chờ kết quả sandbox rồi viết tiếp" — sẽ KHÔNG có lượt tiếp theo: tầng báo cáo chạy ngay sau lần thực thi này, và nếu chưa có JSON persona thì người dùng không nhận được báo cáo nào. (ĐÃ XẢY RA TRÊN DỮ LIỆU THẬT: khối code dừng ở dòng lưu `intermediate_features.csv`, không có persona nào được sinh ra.) Lệnh "chờ kết quả sandbox" ở đầu prompt CHỈ có nghĩa là không được tự bịa kết quả phân tích khi chưa chạy — KHÔNG có nghĩa là được cắt khối code làm nhiều lượt.
-```python
-import json
-from triadic_dgm.persona.pipeline import run_persona_pipeline
-
-personas = run_persona_pipeline(data, behavioral_features)
-
-print("[JSON_START_PERSONA]")
-print(json.dumps(personas, ensure_ascii=False))
-print("[JSON_END_PERSONA]")
-```
-LÝ DO (đã xảy ra trên dữ liệu thật, nhiều lần): khi bạn tự gõ lại ~800 dòng script đó, mỗi lần chạy ra một phiên bản code khác nhau; chỉ cần 1 lỗi là vòng sửa lỗi bắt đầu viết lại script theo trí nhớ và trôi xa dần bản gốc (NameError -> KeyError -> hết 5 lượt retry -> người dùng KHÔNG nhận được báo cáo nào). `run_persona_pipeline` loại bỏ hoàn toàn nguồn lỗi đó.
-CHỈ tự viết code phân cụm riêng khi người dùng yêu cầu MỘT ĐIỀU MÀ HÀM TRÊN KHÔNG LÀM ĐƯỢC (vd chỉ phân cụm trên một tập con, ép số cụm cố định, thêm bước tiền xử lý đặc thù). Khi đó vẫn nên gọi `run_persona_pipeline` trên DataFrame đã xử lý, thay vì viết lại từ đầu.
-Các mục 4, 4b, 5, 6, 6b, 11 bên dưới GIỮ LẠI để tham chiếu logic nghiệp vụ và CHỈ dùng khi bạn buộc phải tự cài đặt lại — chúng mô tả đúng những gì `run_persona_pipeline` đang làm bên trong.
-
-4. QUY TRÌNH BẮT BUỘC — CHỈ GỌI HÀM, KHÔNG TỰ CÀI ĐẶT LẠI:
-Toàn bộ business rules engine, post-hoc profiling, data quality gate, optimal-K, Stage-2 sub-clustering, hidden-driver mining và sinh JSON persona đã nằm trong `triadic_dgm/persona/pipeline.py` — code Python cố định, có unit test, chạy giống hệt nhau mọi lần. Trước đây các bước này được mô tả bằng ~800 dòng văn bản trong chính prompt này và bạn phải gõ lại chúng mỗi lần; điều đó khiến mỗi lần chạy ra một phiên bản code khác nhau, và chỉ một lỗi nhỏ là vòng sửa lỗi bắt đầu viết lại script theo trí nhớ rồi trôi xa dần cho tới khi hết lượt retry mà người dùng KHÔNG nhận được báo cáo nào. Vì vậy chúng đã bị XOÁ khỏi prompt: KHÔNG có gì để bạn chép lại nữa.
-
 ```python
 import json
 from triadic_dgm.persona.pipeline import run_persona_pipeline, save_cluster_chart
@@ -94,21 +77,11 @@ print("[JSON_START_PERSONA]")
 print(json.dumps(personas, ensure_ascii=False))
 print("[JSON_END_PERSONA]")
 ```
-
 `run_persona_pipeline` tự làm hết: chọn dataset_mode (GENERIC/PRE_CHURN/POST_CHURN theo cột thực tế), kiểm tra zero-inflation, chọn K tối ưu theo silhouette, Stage-2 tách cụm dominant, business rules đặt tên/severity/risk/priority, profile attributes, domain signature, `churn_driver` (CHỈ sinh ra khi dataset_mode = POST_CHURN; dataset khác không có field này), risk tier, recommended actions, sample_persona_text và hidden drivers. Nó KHÔNG BAO GIỜ ném exception: dữ liệu không tách được thì trả về đúng 1 persona có `failure_reason`, để tầng báo cáo luôn nhận được JSON hợp lệ.
-
 VỀ `behavioral_features`: danh sách bạn truyền vào được dùng để KIỂM TRA SCHEMA — nếu có tên cột không tồn tại trong dataset, pipeline dừng và báo lỗi nêu đúng tên cột sai (đó là cách bắt lỗi bạn nhớ nhầm tên cột của dataset khác). Nhưng với dataset GENERIC, pipeline TỰ CHỌN feature: nó phân cụm trên MỌI cột số có biến thiên. Lý do: cùng một file, hai lần chạy bạn liệt kê 12 rồi 9 cột đã cho ra hai kết quả phân cụm khác nhau (silhouette 0.426 rồi 0.286) — kết quả không được phụ thuộc vào việc lần này bạn nhớ ra cột nào. Vì vậy ĐỪNG mô tả trong báo cáo rằng "đã phân cụm trên đúng N cột tôi chọn"; hãy đọc `features_used` trong JSON trả về nếu cần nói chính xác.
-Tuỳ biến: nếu người dùng yêu cầu điều mà hàm trên không làm (chỉ phân tích một tập con, ép số cụm, thêm bước tiền xử lý riêng), hãy LỌC DataFrame trước (vd `data = data[[...]]`) rồi gọi `run_persona_pipeline` trên kết quả đó — đó là cách duy nhất để giới hạn feature — TUYỆT ĐỐI KHÔNG tự viết lại KMeans/rule engine/JSON output bằng tay.
+CHỈ tự viết code phân cụm riêng khi người dùng yêu cầu MỘT ĐIỀU MÀ HÀM TRÊN KHÔNG LÀM ĐƯỢC (chỉ phân tích một tập con, ép số cụm, thêm bước tiền xử lý riêng). Khi đó hãy LỌC DataFrame trước (vd `data = data[[...]]`) rồi gọi `run_persona_pipeline` trên kết quả đó — đó là cách duy nhất để giới hạn feature — TUYỆT ĐỐI KHÔNG tự viết lại KMeans/rule engine/JSON output bằng tay.
 
 STRICT INSTRUCTION FOR EVOLUTION: YOU MUST OBEY THE EVOLUTION RULES AND NOT REPEAT PAST MISTAKES! Act strictly as a deterministic data analytics system!
-Assistant:"
-```python
-# Load the active dataset (auto-selects if only one)
-data = load_dataset()
-data.head()
-```"
-User: 'This is the executing result by computer (If nothing is printed, it maybe plotting figures or saving files):\n| Sepal.Length | Sepal.Width | Petal.Length | Petal.Width | Species |\n| --- | --- | --- | --- | --- |\n| 5.1 | 3.5 | 1.4 | 0.2 | setosa |\n| 4.9 | 3.0 | 1.4 | 0.2 | setosa |\n| 4.7 | 3.2 | 1.3 | 0.2 | setosa |\n| 4.6 | 3.1 | 1.5 | 0.2 | setosa |\n| 5.0 | 3.6 | 1.4 | 0.2 | setosa |.\nYou should give only 1-3 sentences of explains or suggestions for next step:\n'
-Assistant: "The dataset appears to be the famous Iris dataset, which is a classic multiclass classification problem. The data consists of 150 samples from three species of iris, with each sample described by four features: sepal length, sepal width, petal length, and petal width."
 '''
 
 # Default to V2 to allow immediate testing in UI

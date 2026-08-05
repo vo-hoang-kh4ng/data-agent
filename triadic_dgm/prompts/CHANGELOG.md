@@ -5,6 +5,62 @@ Theo `CLAUDE.md`: mọi thay đổi system prompt của Persona Agent phải ghi
 
 ---
 
+## 2026-08-05 — `PROGRAMMER_PROMPT_V2`: cắt 21% độ dài, bỏ ví dụ dạy ngược lại luật
+
+**Lý do.** Phía phục vụ bị bóp còn 32.000 token và một lượt chạy thật chết ở 32.001. Dựng
+lại những gì đang nằm trong cửa sổ lúc đó:
+
+| | token |
+|---|---:|
+| system prompt | 3.933 |
+| task prompt | 666 |
+| script sinh lần 1 | 2.000 |
+| một vòng sửa lỗi (`CODE_FIX` + trace) | 3.442 |
+| script sửa lần 1 | 2.000 |
+| **tổng** | **12.041** |
+
+Lỗi báo 12.001 — khớp. System prompt là một phần ba, và là phần DUY NHẤT phải trả ở **mọi**
+lệnh gọi; những phần kia ít nhất còn đổi lấy một script hoặc một chẩn đoán.
+
+**Đã đổi.**
+
+| Trước | Sau | Vì sao |
+|---|---|---|
+| Mục 3b và mục 4 đều bảo "gọi `run_persona_pipeline`, đừng tự cài lại", mỗi mục một khối code giống nhau | Gộp thành mục 5, một khối code duy nhất | Trùng chứng minh được. Mục 3b tự nhận là "ƯU TIÊN CAO NHẤT, GHI ĐÈ MỌI HƯỚNG DẪN Ở MỤC 4" — ghi đè một mục nói y hệt nó. Lý do "gõ lại ~800 dòng gây trôi code" được nói **ba lần** (dòng 39, 51, 56) bằng ba cách diễn đạt. |
+| "Các mục 4, 4b, 5, 6, 6b, 11 bên dưới GIỮ LẠI để tham chiếu" | Bỏ | Trong sáu mục đó **chỉ mục 4 tồn tại**. Năm mục kia đã bị xoá cùng lúc với việc chuyển pipeline vào `pipeline.py`, còn con trỏ thì sống sót. Một con trỏ treo trong prompt tệ hơn trong code: không có gì báo lỗi — model được bảo rằng chi tiết có thẩm quyền nằm ở đâu đó, không tìm thấy, và lấp chỗ trống bằng những gì nó nhớ về dataset khác. |
+| Hai danh sách đánh số va nhau: "Remember 2 points" dùng 1./2., rồi danh sách pipeline **cũng bắt đầu từ 2.** | Dời danh sách pipeline sang 3/4/5 | Mục 3 cũ nói "đã chốt ở mục 2 phía trên" — trỏ được vào cả hai. |
+| Ví dụ minh hoạ cuối prompt: Assistant viết `data.head()` rồi **dừng lượt**, User trả kết quả sandbox (bảng Iris), Assistant bình luận | Bỏ | Xem dưới. |
+| `(2)` bảo dùng matplotlib/seaborn vẽ biểu đồ; dòng ngay sau đó hét lại đúng điều ấy bằng chữ in hoa | Một dòng, giữ phần cụ thể (`plt.show()`) | Cùng một chỉ dẫn nói hai lần. |
+
+**Ví dụ minh hoạ dạy ngược lại ba luật của chính prompt này.**
+
+1. `MỘT KHỐI CODE DUY NHẤT, KHÔNG CHIA LƯỢT` — ví dụ kết thúc lượt sau một khối code dở rồi
+   chờ lượt sau. Không có lượt sau; đó đúng là hỏng hóc mà luật này sinh ra để chặn, và
+   chính prompt trích nó như đã xảy ra trên dữ liệu thật.
+2. `NO MATTER WHAT THE USER ASKS ... ALWAYS WRITE THE FULL CLUSTERING PIPELINE AND OUTPUT THE
+   JSON PERSONA` — ví dụ viết một lượt EDA, không pipeline, không JSON.
+3. Prompt không được đưa cho model một schema cụ thể mà nó không phân tích —
+   `test_prompt_names_no_customer_and_no_dataset_shape` đã canh điều này cho cột telco.
+   `Sepal.Length` là đúng lỗi đó mặc bộ dataset khác.
+
+Luật từng thua ví dụ một lần rồi, ở prompt sinh narrative của báo cáo
+(`tests/test_report_strings_state_no_cause.py::test_the_prompts_worked_example_does_not_demonstrate_a_causal_conclusion`).
+Ví dụ là thứ model chép; nó thắng luật.
+
+**Kết quả.** 11.799 → 9.272 ký tự (~3.933 → ~3.090 token), 12,3% → 9,7% cửa sổ 32k.
+
+**KHÔNG đổi.** `CODE_FIX` — hai đoạn dài 1.299 và 1.329 ký tự được nối vào **mỗi** vòng sửa
+lỗi (~880 token/vòng), là chỗ béo lớn thứ hai. Nhưng comment lịch sử nói chúng có từ những
+lần hỏng thật ("THIS HAS CAUSED REPEATED WASTED ATTEMPTS"), nên cắt chúng là đánh cược vào
+việc lỗi cũ không quay lại — cần đo trước, không cắt mù.
+
+**Bảo vệ.** `tests/test_prompt_pays_for_its_own_length.py` — ngân sách 9.500 ký tự, cấm hai
+mục cùng ra lệnh gọi pipeline, cấm hai khối code giống nhau, cấm trỏ vào mục không tồn tại,
+cấm trùng số mục, cấm ví dụ chia lượt và schema lạ. Kèm một test liệt kê từng chỉ dẫn duy
+nhất phải sống sót qua lần gộp.
+
+---
+
 ## 2026-07-27 — `PROGRAMMER_PROMPT_V2`: gỡ định danh dataset khỏi prompt tĩnh
 
 **Lý do.** Người dùng upload một dataset bán lẻ 17 cột (Olist) và model sinh ra
